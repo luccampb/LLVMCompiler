@@ -404,7 +404,199 @@ class IntASTnode : public ASTnode {
 
 public:
   IntASTnode(TOKEN tok, int val) : Val(val), Tok(tok) {}
-  virtual Value *codegen() override;
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
+/// BoolASTnode - Class for boolean literals true and false
+class BoolASTnode : public ASTnode {
+  bool Val;
+  TOKEN Tok;
+  std::string Name;
+
+public:
+  BoolASTnode(TOKEN tok, bool val) : Val(val), Tok(tok) {}
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
+/// FloatASTnode - Class for float literals like 1.4, 3.5, 60
+class FloatASTnode : public ASTnode {
+  float Val;
+  TOKEN Tok;
+  std::string Name;
+
+public:
+  FloatASTnode(TOKEN tok, float val) : Val(val), Tok(tok) {}
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
+// ExternASTNode - Class for externs (IDK what they are)
+class ExternASTnode : public ASTnode {
+  std::string Function_Name;
+  std::unique_ptr<ASTnode> Params;
+  TOKEN Tok;
+
+public:
+  ExternASTnode(TOKEN tok, std::string function_name, std::unique_ptr<ASTnode> params) : Tok(tok), Function_Name(function_name), Params(std::move(params)) {}
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
+//var decl and fun decl - var is "var type ident;" fun "type_spec Ident..."
+
+// VarDeclASTNode - Class for variable declarations
+class VarDeclASTNode : public ASTnode {
+  std::string VarType;
+  std::string Ident;
+  TOKEN Tok;
+
+public:
+  VarDeclASTNode(TOKEN tok, std::string vartype, std::string ident) : Tok(tok), VarType(vartype), Ident(ident) {}
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
+// FunDeclASTNode - Class for function declarations
+class FunDeclASTNode : public ASTnode {
+  std::string VarType;
+  std::string Ident;
+  TOKEN Tok;
+
+public:
+  FunDeclASTNode(TOKEN tok, std::string vartype, std::string ident) : Tok(tok), VarType(vartype), Ident(ident) {}
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
+// NOT SURE YET
+// class ParamsASTNode : public ASTnode{
+//   std::string 
+// }
+
+class ParamASTNode : public ASTnode {
+  std::string VarType;
+  std::string Ident;
+  TOKEN Tok;
+
+public:
+  ParamASTNode(TOKEN tok, std::string vartype, std::string ident) : Tok(tok), VarType(vartype), Ident(ident) {}
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
+//NOT SURE
+// class BlockASTNode : public ASTnode {
+//   std::string VarType;
+//   std::string Ident;
+//   TOKEN Tok;
+
+// public:
+//   BlockASTNode(TOKEN tok, std::string vartype, std::string ident) : Tok(tok), VarType(vartype), Ident(ident) {}
+//   // virtual Value *codegen() override;
+//   // virtual std::string to_string() const override {
+//   // return a sting representation of this AST node
+//   //};
+// };
+
+class LocalDeclASTNode : public ASTnode {
+  std::string VarType;
+  std::string Ident;
+  TOKEN Tok;
+
+public:
+  LocalDeclASTNode(TOKEN tok, std::string vartype, std::string ident) : Tok(tok), VarType(vartype), Ident(ident) {}
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
+class StmtASTNode : public ASTnode {
+  std::unique_ptr<ASTnode> Statement;
+  TOKEN Tok;
+
+public:
+  StmtASTNode(TOKEN tok, std::unique_ptr<ASTnode> statement) : Tok(tok), Statement(std::move(statement)) {}
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
+class ExprStmtASTNode : public ASTnode {
+  std::unique_ptr<ASTnode> Expr;
+  TOKEN Tok;
+
+public:
+  ExprStmtASTNode(TOKEN tok, std::unique_ptr<ASTnode> expr) : Tok(tok), Expr(std::move(expr)) {}
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
+class WhileStmtASTNode : public ASTnode {
+  std::unique_ptr<ASTnode> Expr;
+  std::unique_ptr<ASTnode> Statement;
+  TOKEN Tok;
+
+public:
+  WhileStmtASTNode(TOKEN tok, std::unique_ptr<ASTnode> expr, std::unique_ptr<ASTnode> statement) : Tok(tok), Expr(std::move(expr)), Statement(std::move(Statement)) {}
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
+class IfStmtASTNode : public ASTnode {
+  std::unique_ptr<ASTnode> Expr;
+  std::unique_ptr<ASTnode> Block;
+  std::unique_ptr<ASTnode> ElseStmt;
+  TOKEN Tok;
+
+public:
+  IfStmtASTNode(TOKEN tok, std::unique_ptr<ASTnode> expr, std::unique_ptr<ASTnode> block, std::unique_ptr<ASTnode> elsestmt) : Tok(tok), Expr(std::move(expr)), Block(std::move(block)), ElseStmt(std::move(elsestmt)) {}
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
+class ElseStmtASTNode : public ASTnode {
+  std::unique_ptr<ASTnode> Block;
+  TOKEN Tok;
+
+public:
+  ElseStmtASTNode(TOKEN tok, std::unique_ptr<ASTnode> block) : Tok(tok), Block(std::move(block)) {}
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
+class ReturnStmtASTNode : public ASTnode {
+  std::unique_ptr<ASTnode> Expr;
+  TOKEN Tok;
+
+public:
+  ReturnStmtASTNode(TOKEN tok, std::unique_ptr<ASTnode> expr) : Tok(tok), Expr(std::move(expr)) {}
+  // virtual Value *codegen() override;
   // virtual std::string to_string() const override {
   // return a sting representation of this AST node
   //};
@@ -418,6 +610,86 @@ public:
 
 /* Add function calls for each production */
 
+/*
+program ::= extern_list decl_list 
+           | decl_list
+extern_list ::= extern extern_list
+	|   extern
+extern ::= "extern" type_spec IDENT "(" params ")" ";"
+decl_list ::= decl decl_list
+	|   decl
+decl ::= var_decl 
+        |  fun_decl
+var_decl ::= var_type IDENT ";" 
+type_spec ::= "void"
+             |  var_type           
+var_type  ::= "int" |  "float" |  "bool"
+fun_decl ::= type_spec IDENT "(" params ")" block
+params ::= param_list  
+          |  "void" | epsilon
+param_list ::= param "," param_list'
+	|   param
+param_list' ::= param "," param_list'
+	|   param
+param ::= var_type IDENT
+block ::= "{" local_decls stmt_list "}"
+local_decls ::= local_decl local_decls
+	| epsilon
+local_decl ::= var_type IDENT ";"
+stmt_list ::= stmt stmt_list
+	| epsilon
+stmt ::= expr_stmt 
+        |  block 
+        |  if_stmt 
+        |  while_stmt 
+        |  return_stmt
+expr_stmt ::= expr ";" 
+             |  ";"
+while_stmt ::= "while" "(" expr ")" stmt 
+if_stmt ::= "if" "(" expr ")" block else_stmt
+else_stmt  ::= "else" block
+              |  epsilon
+return_stmt ::= "return" ";" 
+               |  "return" expr ";"               
+# operators in order of increasing precedence      
+expr ::= IDENT "=" expr
+        | rval  
+rval ::= operator_or
+operator_or ::= operator_and operator_or'
+operator_or' ::= "||" operator_and operator_or'
+		| epsilon
+operator_and ::= operator_equal operator_and'
+operator_and' ::= "&&" operator_equal operator_and'
+		| epsilon
+operator_equal ::= operator_comp operator_equal'
+operator_equal' ::= "==" operator_comp operator_equal'
+		| "!=" operator_comp operator_equal'
+		| epsilon
+operator_comp ::= operator_add operator_comp'
+operator_comp' ::= "<" operator_add operator_comp'
+		| "<=" operator_add operator_comp'
+		| ">" operator_add operator_comp'
+		| ">=" operator_add operator_comp'
+		| epsilon
+operator_add ::= operator_times operator_add'
+operator_add' ::= "+" operator_times operator_add'
+		| "-" operator_times operator_add'
+		| epsilon
+operator_times ::= rval' operator_times'
+operator_times' ::= "*" rval' operator_times'
+		| "/" rval' operator_times'
+		| "%" rval' operator_times'
+		| epsilon
+rval' ::= "-" rval' | "!" rval'
+        | "(" expr ")"
+        | IDENT | IDENT "(" args ")"
+        | INT_LIT | FLOAT_LIT | BOOL_LIT
+args ::= arg_list 
+        |  epsilon
+arg_list ::= expr "," arg_list
+	|   expr
+
+*/
 // program ::= extern_list decl_list
 static void parser() {
   // add body
