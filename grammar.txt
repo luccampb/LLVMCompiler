@@ -35,20 +35,19 @@ if_stmt ::= "if" "(" expr ")" block else_stmt
 else_stmt  ::= "else" block
               |  epsilon
 return_stmt ::= "return" ";" 
-               |  "return" expr ";"      /////////         
-# operators in order of increasing precedence      
+               |  "return" expr ";"       
+# operators in order of increasing precedence    
 expr ::= IDENT "=" expr
-        | rval  
-rval ::= operator_or
+        | operator_or  
 operator_or ::= operator_and operator_or'
 operator_or' ::= "||" operator_and operator_or'
 		| epsilon
-operator_and ::= operator_equal operator_and'
-operator_and' ::= "&&" operator_equal operator_and'
+operator_and ::= operator_equiv operator_and'
+operator_and' ::= "&&" operator_equiv operator_and'
 		| epsilon
-operator_equal ::= operator_comp operator_equal'
-operator_equal' ::= "==" operator_comp operator_equal'
-		| "!=" operator_comp operator_equal'
+operator_equiv ::= operator_comp operator_equiv'
+operator_equiv' ::= "==" operator_comp operator_equiv'
+		| "!=" operator_comp operator_equiv'
 		| epsilon
 operator_comp ::= operator_add operator_comp'
 operator_comp' ::= "<" operator_add operator_comp'
@@ -60,12 +59,12 @@ operator_add ::= operator_times operator_add'
 operator_add' ::= "+" operator_times operator_add'
 		| "-" operator_times operator_add'
 		| epsilon
-operator_times ::= rval' operator_times'
-operator_times' ::= "*" rval' operator_times'
-		| "/" rval' operator_times'
-		| "%" rval' operator_times'
+operator_times ::= rval operator_times'
+operator_times' ::= "*" rval operator_times'
+		| "/" rval operator_times'
+		| "%" rval operator_times'
 		| epsilon
-rval' ::= "-" rval' | "!" rval'
+rval ::= "-" rval | "!" rval
         | "(" expr ")"
         | IDENT | IDENT "(" args ")"
         | INT_LIT | FLOAT_LIT | BOOL_LIT
