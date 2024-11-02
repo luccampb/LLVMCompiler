@@ -763,18 +763,18 @@ public:
 
 /* Add function calls for each production */
 
-static std::unique_ptr<ParamsASTNode> HandleParams() {
+static std::unique_ptr<ParamsASTNode> ParseParams() {
   //Params consist of vector of paramast
   if (CurTok.type!=LPAR) {
     //Error
   }
   getNextToken(); //Consume "("
-  //Handle void case first
+  //Parse void case first
   if (CurTok.type == VOID_TOK) {
     return std::make_unique<VoidParamsASTNode>();
   }
   std::vector<std::unique_ptr<ParamASTNode>> paramList;
-  //Handle param_list
+  //Parse param_list
   while (CurTok.type == INT_TOK || CurTok.type == FLOAT_TOK || CurTok.type == BOOL_TOK) {
     TOKEN varType = CurTok;
     getNextToken(); //Consume type
@@ -790,18 +790,69 @@ static std::unique_ptr<ParamsASTNode> HandleParams() {
     }
     getNextToken(); //Consume RPAR or COMMA
   }
-  //Handle epsilon
+  //Parse epsilon
   if (paramList.empty()) {
     return nullptr;
   }
   return std::make_unique<ListParamsASTNode>(paramList);  
 };
 
-static std::unique_ptr<BlockASTNode> HandleBlock() {
+static std::unique_ptr<LocalDeclASTNode> ParseLocalDecl() {
+  TOKEN varType = CurTok;
+  TOKEN ident = getNextToken(); //Consume var_type
+  if(ident.type!=IDENT) {
+    //ERROR
+  }
+  getNextToken();
+  if(CurTok.type!=SC) {
+    //ERROR
+  }
+  return std::make_unique<LocalDeclASTNode>(varType, ident);
+}
+
+static std::vector<std::unique_ptr<LocalDeclASTNode>> ParseLocalDecls() {
+  //local decl or epsilon
+  //for epsilon case check follow set so we dont error
+  //follow local_decls is "!" "(" "-" ";" "if" "return" "while" "{" "}" BOOL_LIT FLOAT_LIT IDENT INT_LIT
+  std::vector<TOKEN_TYPE> followSet = {NOT, LPAR, MINUS, IF, RETURN, WHILE, LBRA, RBRA, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
+  auto search = std::find(followSet.begin(), followSet.end(), CurTok.type);
+  if(search==followSet.end()) {
+    //Error
+  }
+  // std::vector<TOKEN_TYPE> varTypes = {BOOL_LIT, FLOAT_LIT, INT_LIT};
+  // search = std::find(varTypes.begin(), varTypes.end(), CurTok.type);
+  // if(search==followSet.end()) {
+  //   return nullptr;
+  // }
+  std::vector<std::unique_ptr<LocalDeclASTNode>> localDecls;
+  while (CurTok.type == BOOL_LIT || CurTok.type == FLOAT_LIT || CurTok.type == INT_LIT) {
+    localDecls.push_back(std::move(ParseLocalDecl()));
+  }
+  return std::move(localDecls);
+}
+
+static std::vector<std::unique_ptr<StmtASTNode>> ParseStmtList() {
   
 }
 
-static std::vector<std::unique_ptr<ExternASTNode>> HandleExternList() {
+static std::unique_ptr<BlockASTNode> ParseBlock() {
+  //"{" local_decls stmt_list "}" 
+  if (CurTok.type!=LBRA) {
+    //ERROR
+  }
+  getNextToken(); //Consume "{"
+  //local_decls
+  std::vector<std::unique_ptr<LocalDeclASTNode>> localDecls = std::move(ParseLocalDecls());
+  //stmt_list
+  std::vector<std::unique_ptr<StmtASTNode>> statements = std::move(ParseStmtList());
+  if (CurTok.type!=RBRA) {
+    //ERROR
+  }
+  getNextToken(); //Consume "}"
+  return std::make_unique<BlockASTNode>(localDecls, statements);
+}
+
+static std::vector<std::unique_ptr<ExternASTNode>> ParseExternList() {
   std::vector<std::unique_ptr<ExternASTNode>> externList;
   TOKEN type;
   TOKEN ident;
@@ -820,7 +871,7 @@ static std::vector<std::unique_ptr<ExternASTNode>> HandleExternList() {
       //Error
     }
     getNextToken(); //Consumes IDENT
-    std::unique_ptr<ParamsASTNode> params = std::move(HandleParams()); //Handles params
+    std::unique_ptr<ParamsASTNode> params = std::move(ParseParams()); //Parses params
     if (CurTok.type!=SC) {
       //Error
     }
@@ -831,7 +882,7 @@ static std::vector<std::unique_ptr<ExternASTNode>> HandleExternList() {
   return std::move(externList);
 };
 
-static std::unique_ptr<VarDeclASTNode> HandleVarDecl() {
+static std::unique_ptr<VarDeclASTNode> ParseVarDecl() {
   if (CurTok.type!=INT_TOK && CurTok.type!=FLOAT_TOK && CurTok.type!=BOOL_TOK) {
     //ERROR
   }
@@ -848,7 +899,7 @@ static std::unique_ptr<VarDeclASTNode> HandleVarDecl() {
   return std::make_unique<VarDeclASTNode>(varType, ident);
 }
 
-static std::unique_ptr<FunDeclASTNode> HandleFunDecl() {
+static std::unique_ptr<FunDeclASTNode> ParseFunDecl() {
   TOKEN varType;
   TOKEN ident;
   if (CurTok.type!=INT_TOK && CurTok.type!=FLOAT_TOK && CurTok.type!=BOOL_TOK && CurTok.type!=VOID_TOK) {
@@ -863,12 +914,12 @@ static std::unique_ptr<FunDeclASTNode> HandleFunDecl() {
     //Error
   }
   getNextToken(); //Consumes IDENT
-  std::unique_ptr<ParamsASTNode> params = std::move(HandleParams()); //Handles params
-  std::unique_ptr<BlockASTNode> block = std::move(HandleBlock()); //Handles block
+  std::unique_ptr<ParamsASTNode> params = std::move(ParseParams()); //Parses params
+  std::unique_ptr<BlockASTNode> block = std::move(ParseBlock()); //Parses block
   return std::make_unique<FunDeclASTNode>(varType, ident, std::move(params), std::move(block));
 }
 
-static std::vector<std::unique_ptr<DeclASTNode>> HandleDeclList() {
+static std::vector<std::unique_ptr<DeclASTNode>> ParseDeclList() {
   std::vector<std::unique_ptr<DeclASTNode>> declList;
   bool isDecl = true;
   while(isDecl) {
@@ -881,10 +932,10 @@ static std::vector<std::unique_ptr<DeclASTNode>> HandleDeclList() {
     CurTok = current;
     if (thirdTok.type == SC) {
       //Is var_decl
-      declList.push_back(std::move(HandleVarDecl()));
+      declList.push_back(std::move(ParseVarDecl()));
     } else if(thirdTok.type == LPAR || current.type == VOID_TOK) {
       //Is fun_decl
-      declList.push_back(std::move(HandleFunDecl()));
+      declList.push_back(std::move(ParseFunDecl()));
     } else {
       isDecl = false;
     }
@@ -901,8 +952,8 @@ static void parser() {
   switch (CurTok.type) {
     case EXTERN:
     {
-      std::vector<std::unique_ptr<ExternASTNode>> externList = std::move(HandleExternList());
-      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(HandleDeclList());
+      std::vector<std::unique_ptr<ExternASTNode>> externList = std::move(ParseExternList());
+      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(ParseDeclList());
       if(getNextToken().type != EOF_TOK) {
         //Error
       }
@@ -911,7 +962,7 @@ static void parser() {
     }
     case BOOL_TOK:
     {
-      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(HandleDeclList());
+      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(ParseDeclList());
       if(getNextToken().type != EOF_TOK) {
         //Error
       }
@@ -920,7 +971,7 @@ static void parser() {
     }
     case INT_TOK:
     {
-      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(HandleDeclList());
+      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(ParseDeclList());
       if(getNextToken().type != EOF_TOK) {
         //Error
       }
@@ -929,7 +980,7 @@ static void parser() {
     }
     case VOID_TOK:
     {
-      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(HandleDeclList());
+      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(ParseDeclList());
       if(getNextToken().type != EOF_TOK) {
         //Error
       }
@@ -938,7 +989,7 @@ static void parser() {
     }
     case FLOAT_TOK:
     {
-      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(HandleDeclList());
+      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(ParseDeclList());
       if(getNextToken().type != EOF_TOK) {
         //Error
       }
