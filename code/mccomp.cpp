@@ -472,8 +472,17 @@ public:
   //};
 };
 
+class DeclASTNode : public ASTnode {
+public:
+  virtual ~DeclASTNode();
+  // virtual Value *codegen() override;
+  // virtual std::string to_string() const override {
+  // return a sting representation of this AST node
+  //};
+};
+
 // FunDeclASTNode - Class for function declarations
-class FunDeclASTNode : public ASTnode {
+class FunDeclASTNode : public DeclASTNode {
   TOKEN VarType;
   TOKEN Ident;
   std::unique_ptr<ParamsASTNode> Params;
@@ -487,24 +496,12 @@ public:
   //};
 };
 
-class VarDeclASTNode : public ASTnode {
+class VarDeclASTNode : public DeclASTNode {
   TOKEN VarType;
   TOKEN Ident;
 
 public:
   VarDeclASTNode(TOKEN vartype, TOKEN ident) : VarType(vartype), Ident(ident) {}
-  // virtual Value *codegen() override;
-  // virtual std::string to_string() const override {
-  // return a sting representation of this AST node
-  //};
-};
-
-class DeclASTNode : public ASTnode {
-  std::unique_ptr<VarDeclASTNode> VarDecl;
-  std::unique_ptr<FunDeclASTNode> FunDecl;
-
-public:
-  DeclASTNode(std::unique_ptr<VarDeclASTNode> vardecl, std::unique_ptr<FunDeclASTNode> fundecl) : VarDecl(std::move(vardecl)), FunDecl(std::move(fundecl)) {}
   // virtual Value *codegen() override;
   // virtual std::string to_string() const override {
   // return a sting representation of this AST node
@@ -752,10 +749,10 @@ class ProgramASTNode : public ASTnode {
 
 public:
   ProgramASTNode(std::vector<std::unique_ptr<ExternASTNode>> externlist, std::vector<std::unique_ptr<DeclASTNode>> decllist) : ExternList(std::move(externlist)), DeclList(std::move(decllist)) {}
-  // virtual Value *codegen() override;
-  // virtual std::string to_string() const override {
-  // return a sting representation of this AST node
-  //};
+  virtual Value *codegen() override;
+  virtual std::string to_string() const override {
+    //return a sting representation of this AST node
+  };
 };
 
 /* add other AST nodes as nessasary */
@@ -766,9 +763,192 @@ public:
 
 /* Add function calls for each production */
 
+static std::unique_ptr<ParamsASTNode> HandleParams() {
+  //Params consist of vector of paramast
+  if (CurTok.type!=LPAR) {
+    //Error
+  }
+  getNextToken(); //Consume "("
+  //Handle void case first
+  if (CurTok.type == VOID_TOK) {
+    return std::make_unique<VoidParamsASTNode>();
+  }
+  std::vector<std::unique_ptr<ParamASTNode>> paramList;
+  //Handle param_list
+  while (CurTok.type == INT_TOK || CurTok.type == FLOAT_TOK || CurTok.type == BOOL_TOK) {
+    TOKEN varType = CurTok;
+    getNextToken(); //Consume type
+    if (CurTok.type != IDENT) {
+      //Error
+    }
+    TOKEN ident = CurTok;
+    paramList.push_back(std::make_unique<ParamASTNode>(varType, ident)); //Add param to paramList vector
+    getNextToken(); //Consume ident
+    //Next part would either be another param denoted by a comma, or from follow set it would be a bracket.
+    if (CurTok.type != COMMA && CurTok.type != RPAR) {
+      //Error
+    }
+    getNextToken(); //Consume RPAR or COMMA
+  }
+  //Handle epsilon
+  if (paramList.empty()) {
+    return nullptr;
+  }
+  return std::make_unique<ListParamsASTNode>(paramList);  
+};
+
+static std::unique_ptr<BlockASTNode> HandleBlock() {
+  
+}
+
+static std::vector<std::unique_ptr<ExternASTNode>> HandleExternList() {
+  std::vector<std::unique_ptr<ExternASTNode>> externList;
+  TOKEN type;
+  TOKEN ident;
+  //"extern" type_spec IDENT "(" params ")" ";"
+  while(CurTok.type == EXTERN) {
+    getNextToken(); //Consume "extern"
+    if(CurTok.type==BOOL_TOK || CurTok.type==INT_TOK || CurTok.type==VOID_TOK || CurTok.type==FLOAT_TOK) {
+      type = CurTok;
+    } else {
+      //Error
+    }
+    getNextToken(); //Consumes type_spec
+    if (CurTok.type==IDENT) {
+      ident = CurTok;
+    } else {
+      //Error
+    }
+    getNextToken(); //Consumes IDENT
+    std::unique_ptr<ParamsASTNode> params = std::move(HandleParams()); //Handles params
+    if (CurTok.type!=SC) {
+      //Error
+    }
+    getNextToken(); //Consumes ";"
+    std::unique_ptr<ExternASTNode> ext = std::make_unique<ExternASTNode>(type, ident, std::move(params));
+    externList.push_back(ext);
+  }
+  return std::move(externList);
+};
+
+static std::unique_ptr<VarDeclASTNode> HandleVarDecl() {
+  if (CurTok.type!=INT_TOK && CurTok.type!=FLOAT_TOK && CurTok.type!=BOOL_TOK) {
+    //ERROR
+  }
+  TOKEN varType = CurTok;
+  TOKEN ident = getNextToken(); //Consume var_type
+  if (CurTok.type!=IDENT) {
+    //ERROR
+  }
+  getNextToken(); //Consume IDENT
+  if(CurTok.type!=SC) {
+    //ERROR
+  }
+  getNextToken(); //Consume ";"
+  return std::make_unique<VarDeclASTNode>(varType, ident);
+}
+
+static std::unique_ptr<FunDeclASTNode> HandleFunDecl() {
+  TOKEN varType;
+  TOKEN ident;
+  if (CurTok.type!=INT_TOK && CurTok.type!=FLOAT_TOK && CurTok.type!=BOOL_TOK && CurTok.type!=VOID_TOK) {
+    //ERROR
+  } else {
+    varType = CurTok;
+  }
+  getNextToken(); //Consumes type_spec
+  if (CurTok.type==IDENT) {
+    ident = CurTok;
+  } else {
+    //Error
+  }
+  getNextToken(); //Consumes IDENT
+  std::unique_ptr<ParamsASTNode> params = std::move(HandleParams()); //Handles params
+  std::unique_ptr<BlockASTNode> block = std::move(HandleBlock()); //Handles block
+  return std::make_unique<FunDeclASTNode>(varType, ident, std::move(params), std::move(block));
+}
+
+static std::vector<std::unique_ptr<DeclASTNode>> HandleDeclList() {
+  std::vector<std::unique_ptr<DeclASTNode>> declList;
+  bool isDecl = true;
+  while(isDecl) {
+    // Doing this requires a lookahead since the difference between them (unless theres a void) is 3 tokens ahead
+    TOKEN current = CurTok;
+    TOKEN secondTok = getNextToken();  
+    TOKEN thirdTok = getNextToken();
+    putBackToken(thirdTok);
+    putBackToken(secondTok);
+    CurTok = current;
+    if (thirdTok.type == SC) {
+      //Is var_decl
+      declList.push_back(std::move(HandleVarDecl()));
+    } else if(thirdTok.type == LPAR || current.type == VOID_TOK) {
+      //Is fun_decl
+      declList.push_back(std::move(HandleFunDecl()));
+    } else {
+      isDecl = false;
+    }
+  }
+  if(declList.empty()) {
+    //Error
+  }
+  return std::move(declList);
+};
+
 // program ::= extern_list decl_list
 static void parser() {
   // add body
+  switch (CurTok.type) {
+    case EXTERN:
+    {
+      std::vector<std::unique_ptr<ExternASTNode>> externList = std::move(HandleExternList());
+      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(HandleDeclList());
+      if(getNextToken().type != EOF_TOK) {
+        //Error
+      }
+      std::make_unique<ProgramASTNode>(std::move(externList), std::move(declList));
+      break;
+    }
+    case BOOL_TOK:
+    {
+      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(HandleDeclList());
+      if(getNextToken().type != EOF_TOK) {
+        //Error
+      }
+      std::make_unique<ProgramASTNode>(nullptr, std::move(declList));
+      break;
+    }
+    case INT_TOK:
+    {
+      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(HandleDeclList());
+      if(getNextToken().type != EOF_TOK) {
+        //Error
+      }
+      std::make_unique<ProgramASTNode>(nullptr, std::move(declList));
+      break;
+    }
+    case VOID_TOK:
+    {
+      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(HandleDeclList());
+      if(getNextToken().type != EOF_TOK) {
+        //Error
+      }
+      std::make_unique<ProgramASTNode>(nullptr, std::move(declList));
+      break;
+    }
+    case FLOAT_TOK:
+    {
+      std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(HandleDeclList());
+      if(getNextToken().type != EOF_TOK) {
+        //Error
+      }
+      std::make_unique<ProgramASTNode>(nullptr, std::move(declList));
+      break;
+    }
+    default:
+      //Error
+      break;
+    }
 }
 
 //===----------------------------------------------------------------------===//
