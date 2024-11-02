@@ -814,25 +814,143 @@ static std::vector<std::unique_ptr<LocalDeclASTNode>> ParseLocalDecls() {
   //local decl or epsilon
   //for epsilon case check follow set so we dont error
   //follow local_decls is "!" "(" "-" ";" "if" "return" "while" "{" "}" BOOL_LIT FLOAT_LIT IDENT INT_LIT
+  std::vector<std::unique_ptr<LocalDeclASTNode>> localDecls;
+  while (CurTok.type == BOOL_LIT || CurTok.type == FLOAT_LIT || CurTok.type == INT_LIT) {
+    localDecls.push_back(std::move(ParseLocalDecl()));
+  }
   std::vector<TOKEN_TYPE> followSet = {NOT, LPAR, MINUS, IF, RETURN, WHILE, LBRA, RBRA, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   auto search = std::find(followSet.begin(), followSet.end(), CurTok.type);
   if(search==followSet.end()) {
     //Error
   }
-  // std::vector<TOKEN_TYPE> varTypes = {BOOL_LIT, FLOAT_LIT, INT_LIT};
-  // search = std::find(varTypes.begin(), varTypes.end(), CurTok.type);
-  // if(search==followSet.end()) {
-  //   return nullptr;
-  // }
-  std::vector<std::unique_ptr<LocalDeclASTNode>> localDecls;
-  while (CurTok.type == BOOL_LIT || CurTok.type == FLOAT_LIT || CurTok.type == INT_LIT) {
-    localDecls.push_back(std::move(ParseLocalDecl()));
-  }
   return std::move(localDecls);
 }
 
-static std::vector<std::unique_ptr<StmtASTNode>> ParseStmtList() {
+static std::unique_ptr<ExprASTNode> ParseExpr() {
   
+}
+
+static std::unique_ptr<ElseStmtASTNode> ParseElseStmt() {
+  if(CurTok.type!=ELSE) {
+    std::vector<TOKEN_TYPE> followSet =	{NOT, LPAR, MINUS, SC, IF, RETURN, WHILE, LBRA, RBRA, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
+    auto search = std::find(followSet.begin(), followSet.end(), CurTok.type);
+    if(search==followSet.end()) {
+      //ERROR
+    }
+    return nullptr;
+  }
+  std::unique_ptr<BlockASTNode> block = std::move(ParseBlock());
+  return std::make_unique<ElseStmtASTNode>(block);
+}
+
+static std::unique_ptr<IfStmtASTNode> ParseIfStmt() {
+  //"(" expr ")" block else_stmt
+  if(CurTok.type!=LPAR) {
+    //Error
+  }
+  getNextToken(); //Consume (
+  std::unique_ptr<ExprASTNode> expr = std::move(ParseExpr());
+  if(CurTok.type!=RPAR) {
+    //Error
+  }
+  getNextToken(); //Consume )
+  std::unique_ptr<BlockASTNode> block = std::move(ParseBlock());
+  std::unique_ptr<ElseStmtASTNode> elseStmt = std::move(ParseElseStmt());
+  return std::make_unique<IfStmtASTNode>(expr, block, elseStmt);
+}
+
+static std::unique_ptr<StmtASTNode> ParseStmt();
+
+static std::unique_ptr<WhileStmtASTNode> ParseWhileStmt() {
+  //"(" expr ")" stmt 
+  if(CurTok.type!=LPAR) {
+    //Error
+  }
+  getNextToken(); //Consume (
+  std::unique_ptr<ExprASTNode> expr = std::move(ParseExpr());
+  if(CurTok.type!=RPAR) {
+    //Error
+  }
+  getNextToken(); //Consume )
+  std::unique_ptr<StmtASTNode> stmt = std::move(ParseStmt());
+  return std::make_unique<WhileStmtASTNode>(expr, stmt);
+}
+
+static std::unique_ptr<ReturnStmtASTNode> ParseReturnStmt() {
+  //";" | expr ";"  
+  if(CurTok.type==SC) {
+    getNextToken(); //Consume ;
+    return std::make_unique<ReturnStmtASTNode>(nullptr);
+  }
+  std::unique_ptr<ExprASTNode> expr = std::move(ParseExpr());
+  if(CurTok.type!=SC) {
+    //ERROR
+  }
+  getNextToken(); //Consume ;
+  return std::make_unique<ReturnStmtASTNode>(expr);
+}
+
+static std::unique_ptr<StmtASTNode> ParseExprStmt() {
+  //";" | expr ";"  
+  if(CurTok.type==SC) {
+    getNextToken(); //Consume ;
+    return std::make_unique<StmtASTNode>(nullptr);
+  }
+  std::unique_ptr<ExprASTNode> expr = std::move(ParseExpr());
+  if(CurTok.type!=SC) {
+    //ERROR
+  }
+  getNextToken(); //Consume ;
+  return std::make_unique<StmtASTNode>(expr);
+}
+
+static std::unique_ptr<StmtASTNode> ParseStmt() {
+  //expr, block, if, while, return
+  std::vector<TOKEN_TYPE> exprStmtFirst = {NOT, LPAR, MINUS, SC, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
+  std::unique_ptr<StmtASTNode> stmt;
+  if(CurTok.type==IF) {
+    getNextToken(); //Consume IF
+    //IF
+    stmt = std::move(ParseIfStmt());
+  } else if(CurTok.type==WHILE) {
+    getNextToken(); //Consume WHILE
+    //WHILE
+    stmt = std::move(ParseWhileStmt());
+  } else if(CurTok.type==RETURN) {
+    getNextToken(); //Consume RETURN
+    stmt = std::move(ParseReturnStmt());
+    //RETURN
+  } else if(CurTok.type==LBRA) {
+    stmt = std::move(ParseBlock());
+  } else {
+    auto search = std::find(exprStmtFirst.begin(), exprStmtFirst.end(), CurTok.type);
+    if(search!=exprStmtFirst.end()) {
+      //EXPR_STMT
+      stmt = std::move(ParseExprStmt());
+    } else {
+      //ERROR
+    }
+  }
+  return stmt;
+}
+
+static std::vector<std::unique_ptr<StmtASTNode>> ParseStmtList() {
+  std::vector<std::unique_ptr<StmtASTNode>> stmtList;
+  bool isStmt = true;
+  while(isStmt) {
+    std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, SC, IF, RETURN, WHILE, LBRA, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
+    auto search = std::find(firstSet.begin(), firstSet.end(), CurTok.type);
+    if(search==firstSet.end()) {
+      isStmt = false;
+    } else {
+      stmtList.push_back(std::move(ParseStmt()));
+    }
+  }
+  //Now check follow set for no error
+  if(CurTok.type!=RBRA) {
+    //ERROR
+  }
+  return std::move(stmtList);
 }
 
 static std::unique_ptr<BlockASTNode> ParseBlock() {
