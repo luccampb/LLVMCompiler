@@ -580,11 +580,11 @@ public:
 
 //expr ::= IDENT "=" expr in production
 class AssignmentExprASTNode : public ExprASTNode {
-  std::vector<TOKEN> Idents;
-  std::vector<std::unique_ptr<ExprASTNode>> SubExprs;
+  TOKEN Ident;
+  std::unique_ptr<ExprASTNode> SubExpr;
 
 public:
-  AssignmentExprASTNode(std::vector<TOKEN> idents, std::vector<std::unique_ptr<ExprASTNode>> subexprs) : Idents(idents), SubExprs(std::move(subexprs)) {}
+  AssignmentExprASTNode(TOKEN ident, std::unique_ptr<ExprASTNode> subexpr) : Ident(ident), SubExpr(std::move(subexpr)) {}
   // virtual Value *codegen() override;
   // virtual std::string to_string() const override {
   // return a sting representation of this AST node
@@ -616,9 +616,9 @@ public:
 //Function call in rval ::= production
 class FunctionCallASTNode : public RValASTNode {
   TOKEN FuncName;
-  std::vector<std::unique_ptr<ArgListASTNode>> Args;
+  std::unique_ptr<ArgListASTNode> Args;
 public:
-  FunctionCallASTNode(TOKEN funcname, std::vector<std::unique_ptr<ArgListASTNode>> args) : FuncName(funcname), Args(std::move(args)) {}
+  FunctionCallASTNode(TOKEN funcname, std::unique_ptr<ArgListASTNode> args) : FuncName(funcname), Args(std::move(args)) {}
   // virtual Value *codegen() override;
   // virtual std::string to_string() const override {
   // return a sting representation of this AST node
@@ -629,7 +629,7 @@ public:
 class IntASTNode : public RValASTNode {
   int Val;
   TOKEN Tok;
-  std::string Name;
+
 public:
   IntASTNode(TOKEN tok, int val) : Val(val), Tok(tok) {}
   // virtual Value *codegen() override;
@@ -642,7 +642,6 @@ public:
 class BoolASTNode : public RValASTNode {
   bool Val;
   TOKEN Tok;
-  std::string Name;
 
 public:
   BoolASTNode(TOKEN tok, bool val) : Val(val), Tok(tok) {}
@@ -656,7 +655,6 @@ public:
 class FloatASTNode : public RValASTNode {
   float Val;
   TOKEN Tok;
-  std::string Name;
 
 public:
   FloatASTNode(TOKEN tok, float val) : Val(val), Tok(tok) {}
@@ -826,8 +824,254 @@ static std::vector<std::unique_ptr<LocalDeclASTNode>> ParseLocalDecls() {
   return std::move(localDecls);
 }
 
+static std::unique_ptr<ArgListASTNode> ParseArgs() {
+  std::unique_ptr<ArgListASTNode> args;
+  std::vector<std::unique_ptr<ExprASTNode>> exprs;
+  //Args production contains epsilon so need to check follow set as well as first (which is ")")
+  if(CurTok.type==RPAR) {
+    return nullptr;
+  }
+  bool isExpr = true;
+  while(isExpr) {
+    exprs.push_back(std::move(ParseExpr()));
+    if(CurTok.type!=COMMA){
+      isExpr = false;
+    }
+  }
+  return std::make_unique<ArgListASTNode>(exprs);
+}
+
+static std::unique_ptr<RValASTNode> ParseRval() {
+  std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
+  if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
+    //ERROR
+  }
+  if(CurTok.type==NOT || CurTok.type==MINUS) {
+    TOKEN op = CurTok;
+    getNextToken();
+    std::unique_ptr<RValASTNode> rval = std::move(ParseRval());
+    return std::make_unique<UnaryOpRValASTNode>(op, rval);
+  } else if(CurTok.type==LPAR) {
+    getNextToken(); //Consume (
+    std::unique_ptr<ExprASTNode> expr = std::move(ParseExpr());
+    if(CurTok.type!=RPAR) {
+      //Error
+    }
+    getNextToken(); //Consume )
+    return std::move(expr);
+  } else if(CurTok.type==IDENT) {
+    TOKEN ident = CurTok;
+    getNextToken(); //Consume IDENT
+    // "(" isnt in the follow set of rval so we can use this to check which IDENT it is
+    if(CurTok.type==LPAR) {
+      getNextToken(); //Consume (
+      std::unique_ptr<ArgListASTNode> args = std::move(ParseArgs());
+      if (CurTok.type!=RPAR) {
+        //ERROR
+      }
+      return std::make_unique<FunctionCallASTNode>(ident, args);
+    }
+    return std::make_unique<IdentASTNode>(ident);
+  } else if(CurTok.type==INT_LIT) {
+    TOKEN tok = CurTok;
+    int val = std::stoi(CurTok.lexeme);
+    return std::make_unique<IntASTNode>(val, tok);
+  } else if(CurTok.type==FLOAT_LIT) {
+    TOKEN tok = CurTok;
+    float val = std::stof(CurTok.lexeme);
+    return std::make_unique<FloatASTNode>(val, tok);
+  } else if(CurTok.type==BOOL_LIT) {
+    TOKEN tok = CurTok;
+    bool val;
+    if(CurTok.lexeme=="true") {
+      val = true;
+    } else {
+      val = false;
+    }
+    return std::make_unique<BoolASTNode>(val, tok);
+  } else {
+    //Error
+  }
+}
+
+static std::unique_ptr<TimesASTNode> ParseOperatorTimes() {
+  std::vector<std::unique_ptr<RValASTNode>> rvals;
+  std::vector<TOKEN> ops;
+  std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
+  if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
+    //ERROR
+  }
+  rvals.push_back(std::move(ParseRval()));
+  //Check follow set or * / %
+  std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND, EQ, NE, LT, LE, GT, GE, PLUS, MINUS};
+  while(CurTok.type==MINUS || CurTok.type==PLUS) {
+    ops.push_back(CurTok);
+    getNextToken(); //Consume * or / or %
+    rvals.push_back(std::move(ParseRval()));
+  }
+  if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
+    //ERROR
+  }
+  return std::make_unique<TimesASTNode>(rvals, ops);
+}
+
+static std::unique_ptr<AddASTNode> ParseOperatorAdd() {
+  std::vector<std::unique_ptr<TimesASTNode>> times;
+  std::vector<TOKEN> ops;
+  std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
+  if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
+    //ERROR
+  }
+  times.push_back(std::move(ParseOperatorTimes()));
+  //Check follow set or + or -
+  std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND, EQ, NE, LT, LE, GT, GE};
+  while(CurTok.type==MINUS || CurTok.type==PLUS) {
+    ops.push_back(CurTok);
+    getNextToken(); //Consume + or -
+    times.push_back(std::move(ParseOperatorTimes()));
+  }
+  if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
+    //ERROR
+  }
+  return std::make_unique<AddASTNode>(times, ops);
+}
+
+static std::unique_ptr<CompASTNode> ParseOperatorComp() {
+  std::vector<std::unique_ptr<AddASTNode>> adds;
+  std::vector<TOKEN> ops;
+  std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
+  if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
+    //ERROR
+  }
+  adds.push_back(std::move(ParseOperatorAdd()));
+  //Check follow set or < or <= or > or >=
+  std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND, EQ, NE};
+  while(CurTok.type==LT || CurTok.type==LE || CurTok.type==GT || CurTok.type==GE) {
+    ops.push_back(CurTok);
+    getNextToken(); //Consume < or <= or > or >=
+    adds.push_back(std::move(ParseOperatorAdd()));
+  }
+  if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
+    //ERROR
+  }
+  return std::make_unique<CompASTNode>(adds, ops);
+}
+
+static std::unique_ptr<EquivASTNode> ParseOperatorEquiv() {
+  std::vector<std::unique_ptr<CompASTNode>> comps;
+  std::vector<TOKEN> ops;
+  std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
+  if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
+    //ERROR
+  }
+  comps.push_back(std::move(ParseOperatorComp()));
+  //Check follow set or == or !=
+  std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND};
+  while(CurTok.type==EQ || CurTok.type==NE) {
+    ops.push_back(CurTok);
+    getNextToken(); //Consume == or !=
+    comps.push_back(std::move(ParseOperatorComp()));
+  }
+  if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
+    //ERROR
+  }
+  return std::make_unique<EquivASTNode>(comps, ops);
+}
+
+static std::unique_ptr<AndASTNode> ParseOperatorAnd() {
+  std::vector<std::unique_ptr<EquivASTNode>> equivs;
+  std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
+  if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
+    //ERROR
+  }
+  equivs.push_back(std::move(ParseOperatorEquiv()));
+  //Check follow set or &&
+  std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR};
+  while(CurTok.type==AND) {
+    getNextToken(); //Consume &&
+    equivs.push_back(std::move(ParseOperatorEquiv()));
+  }
+  if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
+    //ERROR
+  }
+  return std::make_unique<AndASTNode>(equivs);
+}
+
+static std::unique_ptr<OrASTNode> ParseOperatorOr() {
+  std::vector<std::unique_ptr<AndASTNode>> ands;
+  std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
+  if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
+    //ERROR
+  }
+  ands.push_back(std::move(ParseOperatorAnd()));
+  //Check follow set or ||
+  std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC};
+  while(CurTok.type==OR) {
+    getNextToken(); //Consume ||
+    ands.push_back(std::move(ParseOperatorAnd()));
+  }
+  if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
+    //ERROR
+  }
+  return std::make_unique<OrASTNode>(ands);
+}
+
 static std::unique_ptr<ExprASTNode> ParseExpr() {
-  
+  //Check that the next token will match an expr
+  std::vector<TOKEN_TYPE> firstSet = {NOT, RPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
+  if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
+    //ERROR
+  }
+  //must be an operator_or
+  if(CurTok.type!=IDENT) {
+    std::unique_ptr<OrASTNode> opOr = std::move(ParseOperatorOr());
+    return std::make_unique<OrExprASTNode>(opOr);
+  } else {
+    //Need to do more investigation to see if it is operator_or or not
+    //IDENT in first part of expr is followed by an "=". This can never happen if the
+    //IDENT is from rval. To do this we need to lookahead one token
+    TOKEN ident = CurTok;
+    TOKEN secondTok = getNextToken();
+    if(CurTok.type==ASSIGN) {
+      //expr ::= IDENT "=" expr
+      putBackToken(secondTok);
+      CurTok = ident;
+      getNextToken(); //Consume IDENT
+      getNextToken(); //Consume "="
+      std::unique_ptr<ExprASTNode> subExpr = std::move(ParseExpr());
+      return std::make_unique<AssignmentExprASTNode>(ident, subExpr);
+    } else {
+      //rval ::= IDENT | IDENT "(" args ")"
+      putBackToken(secondTok);
+      CurTok = ident;
+      std::unique_ptr<OrASTNode> opOr = std::move(ParseOperatorOr());
+      return std::make_unique<OrExprASTNode>(opOr);
+    }
+  }
+  std::vector<TOKEN> idents;
+  std::vector<std::unique_ptr<ExprASTNode>> subExprs;
+  //IDENT is in first set of both, must change
+  if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) != firstSet.end()) {
+    //Is 2nd case (operator_or)
+
+  } else if(CurTok.type==IDENT) {
+    //Need lookahead to confirm what part of production it is
+    //look for equals to confirm
+    // if there is an equals after the ident then we know its IDENT = expr
+    idents.push_back(CurTok);
+    getNextToken(); //consume IDENT
+    //Also want to include ( because rval has IDENT "(" args ")" production
+    std::vector<TOKEN_TYPE> rvalFollow = {NOT, MOD, AND, LPAR, RPAR, ASTERIX, PLUS, COMMA, MINUS, DIV, SC, LT, LE, EQ, GT, GE, OR};
+    if(CurTok.type==ASSIGN) { 
+      //IDENT = expr       
+    } else if(std::find(rvalFollow.begin(), rvalFollow.end(), CurTok.type) != rvalFollow.end()) {
+      //IDENT RVAL
+    } else {
+      //ERROR
+    }
+  } else {
+    //ERROR
+  }
 }
 
 static std::unique_ptr<ElseStmtASTNode> ParseElseStmt() {
