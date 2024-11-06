@@ -1182,6 +1182,8 @@ std::unique_ptr<ParamsASTNode> ParseParams() {
   //Params consist of vector of paramast
   //Parse void case first
   if (CurTok.type == VOID_TOK) {
+    getNextToken(); //Consume void
+    getNextToken(); //Consume RPAR
     return std::make_unique<VoidParamsASTNode>();
   }
   std::vector<std::unique_ptr<ParamASTNode>> paramList;
@@ -1207,6 +1209,7 @@ std::unique_ptr<ParamsASTNode> ParseParams() {
   }
   //Parse epsilon
   if (isEpsilon) {
+    getNextToken(); //Consume RPAR
     return nullptr;
   }
   return std::make_unique<ListParamsASTNode>(std::move(paramList));  
@@ -1225,6 +1228,7 @@ std::unique_ptr<LocalDeclASTNode> ParseLocalDecl() {
     HandleError("Expected token ';' in local_decl production");
     return nullptr;
   }
+  getNextToken(); //Consume Semicolon
   return std::make_unique<LocalDeclASTNode>(varType, std::move(ident));
 }
 
