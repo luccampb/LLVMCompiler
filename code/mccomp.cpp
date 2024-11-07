@@ -936,184 +936,220 @@ public:
 };
 
 class TimesASTNode : public ASTnode {
-  
+  std::unique_ptr<RValASTNode> Left;
+  std::unique_ptr<TimesASTNode> Right;
+  TOKEN Op;
+
 public:
-  std::vector<std::unique_ptr<RValASTNode>> RVals;
-  std::vector<TOKEN> Ops;
-  TimesASTNode(std::vector<std::unique_ptr<RValASTNode>>&& rvals, std::vector<TOKEN> ops) : RVals(std::move(rvals)), Ops(ops) {}
-  Value *codegen() override {}
+  TimesASTNode(std::unique_ptr<RValASTNode> left, std::unique_ptr<TimesASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
+  Value* codegen() override {}
   std::string to_string(int indent) const override {
-    std::string str = "Operator_Times";
-    if(RVals.empty()) {
-      str+="\n";
-    }
-    for (int index = 0; index < RVals.size(); ++index) {
+    std::string str;
+    bool hasRight = false;
+    int newIndent = indent;
+    if(Right!=nullptr) {
+      str += "Operator_Times\n";
+      hasRight = true;
+      newIndent++;
+      for(int i = 0; i<indent; i++) {
+        str += "  ";
+      }
+    }    
+    str += Left->to_string(newIndent);
+    if(hasRight) {
       str += "\n";
       for(int i = 0; i<indent; i++) {
         str += "  ";
       }
-      int newIndent = indent + 1;
-      str += RVals.at(index)->to_string(newIndent);
-      if(index != RVals.size()-1) {
-        str += "\n";
-        for(int i = 0; i<indent; i++) {
-          str += "  ";
-        }
-        str += Ops.at(index).lexeme;
-      }      
+      str += Op.lexeme;
+      str += "\n";
+      for(int i = 0; i<indent; i++) {
+        str += "  ";
+      }
+      str += Right->to_string(newIndent);
     }
     return str;
   }
 };
 
 class AddASTNode : public ASTnode {
-  
+  std::unique_ptr<TimesASTNode> Left;
+  std::unique_ptr<AddASTNode> Right;
+  TOKEN Op;
+
 public:
-  std::vector<std::unique_ptr<TimesASTNode>> Times;
-  std::vector<TOKEN> Ops;
-  AddASTNode(std::vector<std::unique_ptr<TimesASTNode>> times, std::vector<TOKEN> ops) : Times(std::move(times)), Ops(ops) {}
-  Value *codegen() override {}
+  AddASTNode(std::unique_ptr<TimesASTNode> left, std::unique_ptr<AddASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
+  Value* codegen() override {}
   std::string to_string(int indent) const override {
-    std::string str = "Operator_Add";
-    if(Times.empty()) {
-      str+="\n";
+    std::string str;
+    bool hasRight = false;
+    int newIndent = indent;
+    if(Right!=nullptr) {
+      str += "Operator_Add\n";
+      hasRight = true;
+      newIndent++;
+      for(int i = 0; i<indent; i++) {
+        str += "  ";
+      }
     }
-    for (int index = 0; index < Times.size(); ++index) {
+    str += Left->to_string(newIndent);
+    if(hasRight) {
       str += "\n";
       for(int i = 0; i<indent; i++) {
         str += "  ";
       }
-      int newIndent = indent + 1;
-      str += Times.at(index)->to_string(newIndent);
-      if(index != Times.size()-1) {
-        str += "\n";
-        for(int i = 0; i<indent; i++) {
-          str += "  ";
-        }
-        str += Ops.at(index).lexeme;
-      }      
+      str += Op.lexeme;
+      str += "\n";
+      for(int i = 0; i<indent; i++) {
+        str += "  ";
+      }
+      str += Right->to_string(newIndent);
     }
     return str;
   }
 };
 
 class CompASTNode : public ASTnode {
-  
+  std::unique_ptr<AddASTNode> Left;
+  std::unique_ptr<CompASTNode> Right;
+  TOKEN Op;
+
 public:
-  std::vector<std::unique_ptr<AddASTNode>> Adds;
-  std::vector<TOKEN> Ops;
-  CompASTNode(std::vector<std::unique_ptr<AddASTNode>> adds, std::vector<TOKEN> ops) : Adds(std::move(adds)), Ops(ops) {}
-  Value *codegen() override {}
+  CompASTNode(std::unique_ptr<AddASTNode> left, std::unique_ptr<CompASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
+  Value* codegen() override {}
   std::string to_string(int indent) const override {
-    std::string str = "Operator_Comps";
-    if(Adds.empty()) {
-      str+="\n";
+    std::string str;
+    bool hasRight = false;
+    int newIndent = indent;
+    if(Right!=nullptr) {
+      str += "Operator_Comp\n";
+      hasRight = true;
+      newIndent++;
+      for(int i = 0; i<indent; i++) {
+        str += "  ";
+      }
     }
-    for (int index = 0; index < Adds.size(); ++index) {
+    str += Left->to_string(newIndent);
+    if(hasRight) {
       str += "\n";
       for(int i = 0; i<indent; i++) {
         str += "  ";
       }
-      int newIndent = indent + 1;
-      str += Adds.at(index)->to_string(newIndent);
-      if(index != Adds.size()-1) {
-        str += "\n";
-        for(int i = 0; i<indent; i++) {
-          str += "  ";
-        }
-        str += Ops.at(index).lexeme;
-      }      
+      str += Op.lexeme;
+      str += "\n";
+      for(int i = 0; i<indent; i++) {
+        str += "  ";
+      }
+      str += Right->to_string(newIndent);
     }
     return str;
   }
 };
 
 class EquivASTNode : public ASTnode {
-  
+  std::unique_ptr<CompASTNode> Left;
+  std::unique_ptr<EquivASTNode> Right;
+  TOKEN Op;
+
 public:
-  std::vector<std::unique_ptr<CompASTNode>> Comps;
-  std::vector<TOKEN> Ops;
-  EquivASTNode(std::vector<std::unique_ptr<CompASTNode>> comps, std::vector<TOKEN> ops) : Comps(std::move(comps)), Ops(ops) {}
-  Value *codegen() override {}
+  EquivASTNode(std::unique_ptr<CompASTNode> left, std::unique_ptr<EquivASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
+  Value* codegen() override {}
   std::string to_string(int indent) const override {
-    std::string str = "Operator_Equiv";
-    if(Comps.empty()) {
-      str+="\n";
+    std::string str;
+    bool hasRight = false;
+    int newIndent = indent;
+    if(Right!=nullptr) {
+      str += "Operator_Equiv\n";
+      hasRight = true;
+      newIndent++;
+      for(int i = 0; i<indent; i++) {
+        str += "  ";
+      }
     }
-    for (int index = 0; index < Comps.size(); ++index) {
+    str += Left->to_string(newIndent);
+    if(hasRight) {
       str += "\n";
       for(int i = 0; i<indent; i++) {
         str += "  ";
       }
-      int newIndent = indent + 1;
-      str += Comps.at(index)->to_string(newIndent);
-      if(index != Comps.size()-1) {
-        str += "\n";
-        for(int i = 0; i<indent; i++) {
-          str += "  ";
-        }
-        str += Ops.at(index).lexeme;
-      }      
+      str += Op.lexeme;
+      str += "\n";
+      for(int i = 0; i<indent; i++) {
+        str += "  ";
+      }
+      str += Right->to_string(newIndent);
     }
     return str;
   }
 };
 
 class AndASTNode : public ASTnode {
-  
+  std::unique_ptr<EquivASTNode> Left;
+  std::unique_ptr<AndASTNode> Right;
+
 public:
-  std::vector<std::unique_ptr<EquivASTNode>> Equivs;
-  AndASTNode(std::vector<std::unique_ptr<EquivASTNode>> equivs) : Equivs(std::move(equivs)) {}
-  Value *codegen() override {}
+  AndASTNode(std::unique_ptr<EquivASTNode> left, std::unique_ptr<AndASTNode> right) : Left(std::move(left)), Right(std::move(right)) {}
+  Value* codegen() override {}
   std::string to_string(int indent) const override {
-    std::string str = "Operator_And";
-    if(Equivs.empty()) {
-      str += "\n";
+    std::string str;
+    bool hasRight = false;
+    int newIndent = indent;
+    if(Right!=nullptr) {
+      str += "Operator_And\n";
+      hasRight = true;
+      newIndent++;
+      for(int i = 0; i<indent; i++) {
+        str += "  ";
+      }
     }
-    for (int index = 0; index < Equivs.size(); ++index) {
+    str += Left->to_string(newIndent);
+    if(hasRight) {
       str += "\n";
       for(int i = 0; i<indent; i++) {
         str += "  ";
       }
-      int newIndent = indent + 1;
-      str += Equivs.at(index)->to_string(newIndent);
-      if(index != Equivs.size()-1) {
-        str += "\n";
-        for(int i = 0; i<indent; i++) {
-          str += "  ";
-        }
-        str += "&&";
-      }      
+      str += "&&";
+      str += "\n";
+      for(int i = 0; i<indent; i++) {
+        str += "  ";
+      }
+      str += Right->to_string(newIndent);
     }
     return str;
   }
 };
 
 class OrASTNode : public ASTnode {
-  
+  std::unique_ptr<AndASTNode> Left;
+  std::unique_ptr<OrASTNode> Right;
+
 public:
-  std::vector<std::unique_ptr<AndASTNode>> Ands;  
-  OrASTNode(std::vector<std::unique_ptr<AndASTNode>> ands) : Ands(std::move(ands)) {}
-  Value *codegen() override {}
+  OrASTNode(std::unique_ptr<AndASTNode> left, std::unique_ptr<OrASTNode> right) : Left(std::move(left)), Right(std::move(right)) {}
+  Value* codegen() override {}
   std::string to_string(int indent) const override {
-    std::string str = "Operator_Or";
-    if(Ands.empty()) {
-      str += "\n";
+    std::string str;
+    bool hasRight = false;
+    int newIndent = indent;
+    if(Right!=nullptr) {
+      str += "Operator_Or\n";
+      hasRight = true;
+      newIndent++;
+      for(int i = 0; i<indent; i++) {
+        str += "  ";
+      }
     }
-    for (int index = 0; index < Ands.size(); ++index) {
+    str += Left->to_string(newIndent);
+    if(hasRight) {
       str += "\n";
       for(int i = 0; i<indent; i++) {
         str += "  ";
       }
-      int newIndent = indent + 1;
-      str += Ands.at(index)->to_string(newIndent);
-      if(index != Ands.size()-1) {
-        str += "\n";
-        for(int i = 0; i<indent; i++) {
-          str += "  ";
-        }
-        str += "||";
-      }      
+      str += "||";
+      str += "\n";
+      for(int i = 0; i<indent; i++) {
+        str += "  ";
+      }
+      str += Right->to_string(newIndent);
     }
     return str;
   }
@@ -1325,137 +1361,143 @@ std::unique_ptr<RValASTNode> ParseRval() {
 }
 
 std::unique_ptr<TimesASTNode> ParseOperatorTimes() {
-  std::vector<std::unique_ptr<RValASTNode>> rvals;
-  std::vector<TOKEN> ops;
+  std::unique_ptr<RValASTNode> left;
+  std::unique_ptr<TimesASTNode> right = nullptr;
+  TOKEN op;
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_times production");
     return nullptr;
   }
-  rvals.push_back(std::move(ParseRval()));
+  left = std::move(ParseRval());
   //Check follow set or * / %
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND, EQ, NE, LT, LE, GT, GE, PLUS, MINUS};
-  while(CurTok.type==ASTERIX || CurTok.type==DIV || CurTok.type==MOD) {
-    ops.push_back(CurTok);
+  if(CurTok.type==ASTERIX || CurTok.type==DIV || CurTok.type==MOD) {
+    op = CurTok;
     getNextToken(); //Consume * or / or %
-    rvals.push_back(std::move(ParseRval()));
+    right = std::move(ParseOperatorTimes());
   }
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';', 'or', 'and', '==', '!=', '<', '<=', '>', '>=', '+', '-' in operator_times production");
     return nullptr;
   }
-  return std::make_unique<TimesASTNode>(std::move(rvals), ops);
+  return std::make_unique<TimesASTNode>(std::move(left), std::move(right), op);
 }
 
 std::unique_ptr<AddASTNode> ParseOperatorAdd() {
-  std::vector<std::unique_ptr<TimesASTNode>> times;
-  std::vector<TOKEN> ops;
+  std::unique_ptr<TimesASTNode> left;
+  std::unique_ptr<AddASTNode> right = nullptr;
+  TOKEN op;
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_add production");
     return nullptr;
   }
-  times.push_back(std::move(ParseOperatorTimes()));
+  left = std::move(ParseOperatorTimes());
   //Check follow set or + or -
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND, EQ, NE, LT, LE, GT, GE};
-  while(CurTok.type==MINUS || CurTok.type==PLUS) {
-    ops.push_back(CurTok);
+  if(CurTok.type==MINUS || CurTok.type==PLUS) {
+    op = CurTok;
     getNextToken(); //Consume + or -
-    times.push_back(std::move(ParseOperatorTimes()));
+    right = std::move(ParseOperatorAdd());
   }
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';', 'or', 'and', '==', '!=', '<', '<=', '>', '>=', in operator_add production");
     return nullptr;
   }
-  return std::make_unique<AddASTNode>(std::move(times), ops);
+  return std::make_unique<AddASTNode>(std::move(left), std::move(right), op);
 }
 
 std::unique_ptr<CompASTNode> ParseOperatorComp() {
-  std::vector<std::unique_ptr<AddASTNode>> adds;
-  std::vector<TOKEN> ops;
+  std::unique_ptr<AddASTNode> left;
+  std::unique_ptr<CompASTNode> right = nullptr;
+  TOKEN op;
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_comp production");
     return nullptr;
   }
-  adds.push_back(std::move(ParseOperatorAdd()));
+  left = std::move(ParseOperatorAdd());
   //Check follow set or < or <= or > or >=
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND, EQ, NE};
-  while(CurTok.type==LT || CurTok.type==LE || CurTok.type==GT || CurTok.type==GE) {
-    ops.push_back(CurTok);
+  if(CurTok.type==LT || CurTok.type==LE || CurTok.type==GT || CurTok.type==GE) {
+    op = CurTok;
     getNextToken(); //Consume < or <= or > or >=
-    adds.push_back(std::move(ParseOperatorAdd()));
+    right = std::move(ParseOperatorComp());
   }
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';', 'or', 'and', '==', '!=' in operator_comp production");
     return nullptr;
   }
-  return std::make_unique<CompASTNode>(std::move(adds), ops);
+  return std::make_unique<CompASTNode>(std::move(left), std::move(right), op);
 }
 
 std::unique_ptr<EquivASTNode> ParseOperatorEquiv() {
-  std::vector<std::unique_ptr<CompASTNode>> comps;
-  std::vector<TOKEN> ops;
+  std::unique_ptr<CompASTNode> left;
+  std::unique_ptr<EquivASTNode> right = nullptr;
+  TOKEN op;
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_equiv production");
     return nullptr;
   }
-  comps.push_back(std::move(ParseOperatorComp()));
+  left = std::move(ParseOperatorComp());
   //Check follow set or == or !=
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND};
-  while(CurTok.type==EQ || CurTok.type==NE) {
-    ops.push_back(CurTok);
+  if(CurTok.type==EQ || CurTok.type==NE) {
+    op = CurTok;
     getNextToken(); //Consume == or !=
-    comps.push_back(std::move(ParseOperatorComp()));
+    right = std::move(ParseOperatorEquiv());
   }
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';', 'or', 'and' after operator_equiv production");
     return nullptr;
   }
-  return std::make_unique<EquivASTNode>(std::move(comps), ops);
+  return std::make_unique<EquivASTNode>(std::move(left), std::move(right), op);
 }
 
 std::unique_ptr<AndASTNode> ParseOperatorAnd() {
-  std::vector<std::unique_ptr<EquivASTNode>> equivs;
+  std::unique_ptr<EquivASTNode> left;
+  std::unique_ptr<AndASTNode> right;
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_and production");
     return nullptr;
   }
-  equivs.push_back(std::move(ParseOperatorEquiv()));
+  left = std::move(ParseOperatorEquiv());
   //Check follow set or &&
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR};
-  while(CurTok.type==AND) {
+  if(CurTok.type==AND) {
     getNextToken(); //Consume &&
-    equivs.push_back(std::move(ParseOperatorEquiv()));
+    right = std::move(ParseOperatorAnd());
   }
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';', 'or' in operator_and production");
     return nullptr;
   }
-  return std::make_unique<AndASTNode>(std::move(equivs));
+  return std::make_unique<AndASTNode>(std::move(left), std::move(right));
 }
 
 std::unique_ptr<OrASTNode> ParseOperatorOr() {
-  std::vector<std::unique_ptr<AndASTNode>> ands;
+  std::unique_ptr<AndASTNode> left;
+  std::unique_ptr<OrASTNode> right = nullptr;
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_or production");
     return nullptr;
   }
-  ands.push_back(std::move(ParseOperatorAnd()));
+  left = std::move(ParseOperatorAnd());
   //Check follow set or ||
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC};
-  while(CurTok.type==OR) {
+  if(CurTok.type==OR) {
     getNextToken(); //Consume ||
-    ands.push_back(std::move(ParseOperatorAnd()));
+    right = std::move(ParseOperatorOr());
   }
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';' in operator_or production");
     return nullptr;
   }
-  return std::make_unique<OrASTNode>(std::move(ands));
+  return std::make_unique<OrASTNode>(std::move(left), std::move(right));
 }
 
 std::unique_ptr<ExprASTNode> ParseExpr() {
