@@ -36,6 +36,13 @@
 using namespace llvm;
 using namespace llvm::sys;
 
+//TODO: 
+// - Finish Codegen
+// - Test Parsing and Codegen
+// - Error handling
+// - Comments
+// - Report
+
 FILE *pFile;
 
 //===----------------------------------------------------------------------===//
@@ -385,6 +392,29 @@ static TOKEN getNextToken() {
 static void putBackToken(TOKEN tok) { tok_buffer.push_front(tok); }
 
 //===----------------------------------------------------------------------===//
+// Codegen Functions
+//===----------------------------------------------------------------------===//
+
+static AllocaInst* CreateEntryBlockAlloca(Function *TheFunction, const std::string &VarName, Type *Type_) {
+  IRBuilder<> tmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
+  return tmpB.CreateAlloca(Type_, 0, VarName.c_str());
+}
+
+static Type *GetTypeOfToken(TOKEN tok) {
+  switch (tok.type) {
+    case BOOL_TOK:
+      return Builder.getInt1Ty();
+    case INT_TOK:
+      return Builder.getInt32Ty();    
+    case FLOAT_TOK:
+      return Builder.getFloatTy();
+    case VOID_TOK:
+      return Builder.getVoidTy();
+  }
+  return nullptr;
+}
+
+//===----------------------------------------------------------------------===//
 // AST nodes
 //===----------------------------------------------------------------------===//
 
@@ -396,30 +426,15 @@ public:
   virtual std::string to_string(int indent) const {return "";};
 };
 
-//IDENT in rval ::= production
-class IdentASTNode : public ASTnode {
-  TOKEN Ident;
-
-public:
-  IdentASTNode(TOKEN ident) : Ident(ident) {}
-  Value *codegen() override {}
-  std::string to_string(int indent) const override {
-    std::string str = "Ident\n";
-    for(int i = 0; i<indent; i++) {
-      str += "  ";
-    }
-    str += Ident.lexeme;
-    return str;
-  }
-};
-
 class ParamASTNode : public ASTnode {
-  TOKEN VarType;
-  std::unique_ptr<IdentASTNode> Ident;
-
 public:
-  ParamASTNode(TOKEN vartype, std::unique_ptr<IdentASTNode> ident) : VarType(vartype), Ident(std::move(ident)) {}
-  Value *codegen() override {}
+  std::string Ident;
+  TOKEN VarType;
+  ParamASTNode(TOKEN vartype, std::string ident) : VarType(vartype), Ident(ident) {}
+  Value *codegen() override {
+    //Handled in FunDeclASTNode and ExternASTNode instead of here due to how functions are created in llvm IR
+    return nullptr;
+  }
   std::string to_string(int indent) const override {
     std::string str = "Param\n";
     for(int i = 0; i<indent; i++) {
@@ -431,25 +446,26 @@ public:
       str += "  ";
     }
     int newIndent = indent + 1;
-    str += Ident->to_string(newIndent);
+    str += Ident;
     return str;
   }
 };
 
 class ParamsASTNode : public ASTnode {
 public:
-  virtual ~ParamsASTNode() {}
-};
-
-class ListParamsASTNode : public ParamsASTNode {
-public:
+  bool IsVoid;
   std::vector<std::unique_ptr<ParamASTNode>> ParamList;
-  ListParamsASTNode(std::vector<std::unique_ptr<ParamASTNode>> paramlist) : ParamList(std::move(paramlist)) {}
-  Value *codegen() override {}
+  ParamsASTNode(std::vector<std::unique_ptr<ParamASTNode>> paramlist, bool isVoid) : ParamList(std::move(paramlist)), IsVoid(isVoid) {}
+  Value *codegen() override {
+    //Handled in FunDeclASTNode and ExternASTNode instead of here due to how functions are created in llvm IR
+    return nullptr;
+  }
   std::string to_string(int indent) const override {
     std::string str = "Params";
-    if (ParamList.empty()) {
+    if (ParamList.empty() && !IsVoid) {
       str += "\n";
+    } else if (ParamList.empty() && IsVoid) {
+      str += "\nVoid Param";
     }
     for(auto&& param : ParamList) {
       str += "\n";
@@ -463,24 +479,39 @@ public:
   }
 };
 
-class VoidParamsASTNode : public ParamsASTNode {
-public:
-  VoidParamsASTNode() {}
-  Value *codegen() override {}
-  std::string to_string(int indent) const override {
-    return "Void Param";
-  }
-};
-
 // ExternASTNode - Class for extern declarations
 class ExternASTNode : public ASTnode {
   TOKEN VarType;
-  std::unique_ptr<IdentASTNode> Ident;
+  std::string FuncName;
   std::unique_ptr<ParamsASTNode> Params;
 
 public:
-  ExternASTNode(TOKEN vartype, std::unique_ptr<IdentASTNode> ident, std::unique_ptr<ParamsASTNode> params) : VarType(vartype), Ident(std::move(ident)), Params(std::move(params)) {}
-  Value *codegen() override {}
+  ExternASTNode(TOKEN vartype, std::string funcName, std::unique_ptr<ParamsASTNode> params) : VarType(vartype), FuncName(funcName), Params(std::move(params)) {}
+  Value *codegen() override {
+    if(Functions[FuncName]) {
+      //ERROR: FUNCTION ALREADY DECLARED
+      return nullptr;
+    }
+    std::vector<Type*> argTypes;
+    if(Params->IsVoid) {
+      argTypes.push_back(Type::getVoidTy(TheContext));
+    }
+    for(auto&& param : Params->ParamList) {
+      argTypes.push_back(GetTypeOfToken(param->VarType));
+    }
+    Type *funcType = GetTypeOfToken(VarType);
+    FunctionType *FT = FunctionType::get(funcType, argTypes, false);
+    Function *F = Function::Create(FT, Function::ExternalLinkage, FuncName, TheModule.get());
+    unsigned idx = 0;
+    for(auto &arg : F->args()) {
+      arg.setName(Params->ParamList[idx++]->Ident);
+    }    
+    if(verifyFunction(*F)) {
+      return nullptr;
+    }
+    Functions[FuncName] = F;
+    return F;
+  }
   std::string to_string(int indent) const override {
     std::string str = "Extern\n";
     for(int i = 0; i<indent; i++) {
@@ -492,7 +523,7 @@ public:
       str += "  ";
     }
     int newIndent = indent + 1;
-    str += Ident->to_string(newIndent);
+    str += FuncName;
     str += "\n";
     if(Params != nullptr) {
       for(int i = 0; i<indent; i++) {
@@ -506,11 +537,28 @@ public:
 
 class LocalDeclASTNode : public ASTnode {
   TOKEN VarType;
-  std::unique_ptr<IdentASTNode> Ident;
+  std::string Ident;
 
 public:
-  LocalDeclASTNode(TOKEN vartype, std::unique_ptr<IdentASTNode> ident) : VarType(vartype), Ident(std::move(ident)) {}
-  Value *codegen() override {}
+  LocalDeclASTNode(TOKEN vartype, std::string ident) : VarType(vartype), Ident(ident) {}
+  Value *codegen() override {
+    BasicBlock *currBlock = Builder.GetInsertBlock();
+    Function *function; 
+    if (currBlock && currBlock->getParent()) {
+      function = currBlock->getParent();  // The insertion point is inside a function
+    } else {
+      //ERROR THIS SHOULD NOT HAPPEN, LOCAL DECLS SHOULD ONLY OCCUR IN A FUNCTION
+      function = nullptr;
+    }
+    if(NamedValues[Ident]) {
+      //ERROR THIS VARIABLE IS DECLARED TWICE
+      return nullptr;
+    }
+    Type *type = GetTypeOfToken(VarType);
+    AllocaInst *alloca = CreateEntryBlockAlloca(function, Ident, type);
+    NamedValues[Ident] = alloca;
+    return alloca;
+  }
   std::string to_string(int indent) const override {
     std::string str = "Local Decl\n";
     for(int i = 0; i<indent; i++) {
@@ -522,7 +570,7 @@ public:
       str += "  ";
     }
     int newIndent = indent + 1;
-    str += Ident->to_string(newIndent);
+    str += Ident;
     return str;
   }
 };
@@ -537,7 +585,13 @@ public:
   std::vector<std::unique_ptr<LocalDeclASTNode>> LocalDecls;
   std::vector<std::unique_ptr<StmtASTNode>> Statements;  
   BlockASTNode(std::vector<std::unique_ptr<LocalDeclASTNode>> localdecls, std::vector<std::unique_ptr<StmtASTNode>> statements) : LocalDecls(std::move(localdecls)), Statements(std::move(statements)) {}
-  Value *codegen() override {}
+  Value *codegen() override {
+    //TODO:
+    //Handle local decls
+
+    //Handle Statements
+
+  }
   std::string to_string(int indent) const override {
     std::string str = "Block";
     for(auto&& localD : LocalDecls) {
@@ -575,13 +629,55 @@ public:
 // FunDeclASTNode - Class for function declarations
 class FunDeclASTNode : public DeclASTNode {
   TOKEN VarType;
-  std::unique_ptr<IdentASTNode> Ident;
+  std::string FuncName;
   std::unique_ptr<ParamsASTNode> Params;
   std::unique_ptr<BlockASTNode> Block;
 
 public:
-  FunDeclASTNode(TOKEN vartype, std::unique_ptr<IdentASTNode> ident, std::unique_ptr<ParamsASTNode> params, std::unique_ptr<BlockASTNode> block) : VarType(vartype), Ident(std::move(ident)), Params(std::move(params)), Block(std::move(block)) {}
-  Value *codegen() override {}
+  FunDeclASTNode(TOKEN vartype, std::string funcName, std::unique_ptr<ParamsASTNode> params, std::unique_ptr<BlockASTNode> block) : VarType(vartype), FuncName(funcName), Params(std::move(params)), Block(std::move(block)) {}
+  Value *codegen() override {
+    //Cannot do this because it doesnt like when a function is defined with extern then as fundecl
+    Function *TheFunction = TheModule->getFunction(FuncName);
+    //If the function is not empty, it has a body (i.e. it has been defined previously)
+    if (!TheFunction->empty()) {
+      return nullptr;
+      //ERROR Function cannot be redefined
+    }
+    std::vector<Type*> argTypes;
+    if(Params->IsVoid) {
+      argTypes.push_back(Type::getVoidTy(TheContext));
+    }
+    for(auto&& param : Params->ParamList) {
+      argTypes.push_back(GetTypeOfToken(param->VarType));
+    }
+    Type *funcType = GetTypeOfToken(VarType);
+    FunctionType *FT = FunctionType::get(funcType, argTypes, false);
+    Function *F = Function::Create(FT, Function::ExternalLinkage, FuncName, TheModule.get());
+    unsigned idx = 0;
+    for(auto &arg : F->args()) {
+      arg.setName(Params->ParamList[idx++]->Ident);
+    }
+    BasicBlock *BB = BasicBlock::Create(TheContext, "func", F);
+    Builder.SetInsertPoint(BB);
+    NamedValues.clear();
+    for(auto &arg : F->args()){
+      AllocaInst *alloca = CreateEntryBlockAlloca(F, arg.getName().data(), arg.getType());
+      Builder.CreateStore(&arg, alloca);
+      NamedValues[arg.getName().data()] = alloca;
+    }
+    if(Value *retval = Block->codegen()) {
+      if(funcType->isVoidTy()) {
+        Builder.CreateRetVoid();
+      } else {
+        Builder.CreateRet(retval);
+      }      
+    }
+    if(verifyFunction(*F)) {
+      return nullptr;
+    }
+    Functions[FuncName] = F;
+    return F;
+  }
   std::string to_string(int indent) const override {
     std::string str = "Fun_Decl\n";
     for(int i = 0; i<indent; i++) {
@@ -593,7 +689,7 @@ public:
       str += "  ";
     }
     int newIndent = indent + 1;
-    str += Ident->to_string(newIndent);    
+    str += FuncName;    
     if(Params != nullptr){
       str += "\n";
       for(int i = 0; i<indent; i++) {
@@ -614,11 +710,28 @@ public:
 
 class VarDeclASTNode : public DeclASTNode {
   TOKEN VarType;
-  std::unique_ptr<IdentASTNode> Ident;
+  std::string Ident;
 
 public:
-  VarDeclASTNode(TOKEN vartype, std::unique_ptr<IdentASTNode> ident) : VarType(vartype), Ident(std::move(ident)) {}
-  Value *codegen() override {}
+  VarDeclASTNode(TOKEN vartype, std::string ident) : VarType(vartype), Ident(ident) {}
+  Value *codegen() override {
+    //Only happen outside functions because of local_decl
+    //Check there is not an error
+    BasicBlock *currBlock = Builder.GetInsertBlock();
+    Function *parent = currBlock->getParent();
+    if (currBlock && parent) {
+      //ERROR VARDECL IN FUNCTION
+      return nullptr;
+    }
+    Type *type = GetTypeOfToken(VarType);
+    if (Globals.count(Ident)==0) {
+      //ERROR - global redeclared
+      return nullptr;
+    }
+    GlobalVariable *g = new GlobalVariable(*TheModule, type, false, GlobalValue::CommonLinkage, Constant::getNullValue(type), Ident);
+    Globals[Ident] = g;
+    return g;
+  }
   std::string to_string(int indent) const override {
     std::string str = "Var_Decl\n";
     for(int i = 0; i<indent; i++) {
@@ -630,7 +743,7 @@ public:
       str += "  ";
     }
     int newIndent = indent + 1;
-    str += Ident->to_string(newIndent);
+    str += Ident;
     return str;
   }
 };
@@ -640,7 +753,9 @@ class ElseStmtASTNode : public StmtASTNode {
 
 public:
   ElseStmtASTNode(std::unique_ptr<BlockASTNode> block) : Block(std::move(block)) {}
-  Value *codegen() override {}
+  Value *codegen() override {
+    return Block->codegen();
+  }
   std::string to_string(int indent) const override {
     std::string str = "Else Statement\n";
     if(Block != nullptr) {
@@ -661,18 +776,28 @@ public:
 
 //IDENT in rval ::= production
 class IdentRvalASTNode : public RValASTNode {
-  std::unique_ptr<IdentASTNode> Ident;
+  std::string Ident;
 
 public:
-  IdentRvalASTNode(std::unique_ptr<IdentASTNode> ident) : Ident(std::move(ident)) {}
-  Value *codegen() override {}
+  IdentRvalASTNode(std::string ident) : Ident(ident) {}
+  Value *codegen() override {
+    //Prioritises named values over globals first
+    if(NamedValues[Ident]) {
+      return Builder.CreateLoad(NamedValues[Ident]->getAllocatedType(), NamedValues[Ident], Ident);
+    } else if(Globals[Ident]) {
+      return Builder.CreateLoad(Globals[Ident]->getType(), Globals[Ident], Ident);
+    } else {
+      //ERROR variable not a global or a named value (not defined yet)
+      return nullptr;
+    }
+  }
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
       str += "  ";
     }
     int newIndent = indent + 1;
-    str += Ident->to_string(newIndent);
+    str += Ident;
     return str;
   }
 };
@@ -687,7 +812,9 @@ class ExprStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
 public:
   ExprStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {}
-  Value *codegen() override {}
+  Value *codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str = "Expr Statement";
     if(Expr != nullptr) {
@@ -709,7 +836,31 @@ class IfStmtASTNode : public StmtASTNode {
 
 public:
   IfStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<BlockASTNode> block, std::unique_ptr<ElseStmtASTNode> elsestmt) : Expr(std::move(expr)), Block(std::move(block)), ElseStmt(std::move(elsestmt)) {}
-  Value *codegen() override {}
+  Value *codegen() override {
+    Function* function = Builder.GetInsertBlock()->getParent();
+    BasicBlock* true_ = BasicBlock::Create(TheContext, "ifTrue", function);
+    BasicBlock* end_ = BasicBlock::Create(TheContext, "end");
+    BasicBlock* else_ = BasicBlock::Create(TheContext, "else");
+    Value* cond = Expr->codegen();
+    if(!cond) {
+      return nullptr;
+    } else if (cond->getType()->isVoidTy()){
+      //ERROR cannot convert void to bool
+      return nullptr;
+    }
+    Value* comp = Builder.CreateICmpNE(cond, ConstantInt::get(TheContext, APInt(32, 0, true)));
+    Builder.CreateCondBr(comp, true_, end_);
+    Builder.SetInsertPoint(true_);
+
+    //TODO: IF BODY
+    Value* body = Block->codegen();
+    Builder.Insert(body);
+
+    function -> insert(function -> end(), end_);
+    Builder.CreateBr(end_);
+    Builder.SetInsertPoint(end_);
+    //TODO: CODE AFTER IF CONDITION
+  }
   std::string to_string(int indent) const override {
     std::string str = "If Statement\n";
     for(int i = 0; i<indent; i++) {
@@ -741,7 +892,9 @@ class WhileStmtASTNode : public StmtASTNode {
 
 public:
   WhileStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<StmtASTNode> statement) : Expr(std::move(expr)), Statement(std::move(statement)) {}
-  Value *codegen() override {}
+  Value *codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str = "While Statement\n";
     for(int i = 0; i<indent; i++) {
@@ -763,7 +916,21 @@ class ReturnStmtASTNode : public StmtASTNode {
 
 public:
   ReturnStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {}
-  Value *codegen() override {}
+  Value *codegen() override {
+    Function *function = Builder.GetInsertBlock()->getParent();
+    Type *returnType = function->getReturnType();
+    if(!Expr) {
+      Value *retVal = Expr->codegen();
+      //TODO: CHECK SAME RETURN VALUE AS FUNC DECL
+      return Builder.CreateRet(retVal);
+    } else {
+      if(!returnType->isVoidTy()) {
+        //ERROR RETURNING VOID WHEN FUNC ISNT VOID
+        return nullptr;
+      }
+      return Builder.CreateRetVoid();
+    }
+  }
   std::string to_string(int indent) const override {
     std::string str = "Return Statement\n";
     if(Expr!=nullptr) {
@@ -783,7 +950,9 @@ class UnaryOpRValASTNode : public RValASTNode {
   std::unique_ptr<RValASTNode> RVal;
 public:
   UnaryOpRValASTNode(TOKEN op, std::unique_ptr<RValASTNode> rval) : Op(op), RVal(std::move(rval)) {}
-  Value *codegen() override {}
+  Value *codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str = "Unary Operator Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -802,19 +971,32 @@ public:
 
 //expr ::= IDENT "=" expr in production
 class AssignmentExprASTNode : public ExprASTNode {
-  std::unique_ptr<IdentASTNode> Ident;
+  std::string Ident;
   std::unique_ptr<ExprASTNode> SubExpr;
 
 public:
-  AssignmentExprASTNode(std::unique_ptr<IdentASTNode> ident, std::unique_ptr<ExprASTNode> subexpr) : Ident(std::move(ident)), SubExpr(std::move(subexpr)) {}
-  Value *codegen() override {}
+  AssignmentExprASTNode(std::string ident, std::unique_ptr<ExprASTNode> subexpr) : Ident(ident), SubExpr(std::move(subexpr)) {}
+  Value *codegen() override {
+    //CASTING NEEDS TO HAPPEN HERE, MAYBE ASK ON TUES
+    //TODO: CASTING
+    if(NamedValues[Ident]) {
+      Builder.CreateStore(SubExpr->codegen(), NamedValues[Ident]);
+      return ;
+    } else if(Globals[Ident]) {
+      Builder.CreateStore(SubExpr->codegen(), Globals[Ident]);
+      return ;
+    } else {
+      //ERROR variable not a global or a named value
+      return nullptr;
+    }
+  }
   std::string to_string(int indent) const override {
     std::string str = "Expr\n";
     for(int i = 0; i<indent; i++) {
       str += "  ";
     }
     int newIndent = indent + 1;
-    str += Ident->to_string(newIndent);
+    str += Ident;
     str += "\n";
     for(int i = 0; i<indent; i++) {
       str += "  ";
@@ -828,7 +1010,9 @@ class ArgListASTNode : public ASTnode {
 public:
   std::vector<std::unique_ptr<ExprASTNode>> Exprs;
   ArgListASTNode(std::vector<std::unique_ptr<ExprASTNode>> exprs) : Exprs(std::move(exprs)) {}
-  Value *codegen() override {}
+  Value *codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str = "Rval";
     if (Exprs.empty()) {
@@ -848,18 +1032,20 @@ public:
 
 //Function call in rval ::= production
 class FunctionCallASTNode : public RValASTNode {
-  std::unique_ptr<IdentASTNode> FuncName;
+  std::string FuncName;
   std::unique_ptr<ArgListASTNode> Args;
 public:
-  FunctionCallASTNode(std::unique_ptr<IdentASTNode> funcname, std::unique_ptr<ArgListASTNode> args) : FuncName(std::move(funcname)), Args(std::move(args)) {}
-  Value *codegen() override {}
+  FunctionCallASTNode(std::string funcname, std::unique_ptr<ArgListASTNode> args) : FuncName(std::move(funcname)), Args(std::move(args)) {}
+  Value *codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
       str += "  ";
     }
     int newIndent = indent + 1;
-    str += FuncName->to_string(newIndent);
+    str += FuncName;
     str += "\n";
     for(int i = 0; i<indent; i++) {
       str += "  ";
@@ -876,7 +1062,9 @@ class IntASTNode : public RValASTNode {
 
 public:
   IntASTNode(int val, TOKEN tok) : Val(val), Tok(tok) {}
-  Value *codegen() override {}
+  Value *codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -898,7 +1086,9 @@ class BoolASTNode : public RValASTNode {
 
 public:
   BoolASTNode(bool val, TOKEN tok) : Val(val), Tok(tok) {}
-  Value *codegen() override {}
+  Value *codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -920,7 +1110,9 @@ class FloatASTNode : public RValASTNode {
 
 public:
   FloatASTNode(float val, TOKEN tok) : Val(val), Tok(tok) {}
-  Value *codegen() override {}
+  Value *codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -942,7 +1134,9 @@ class TimesASTNode : public ASTnode {
 
 public:
   TimesASTNode(std::unique_ptr<RValASTNode> left, std::unique_ptr<TimesASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
-  Value* codegen() override {}
+  Value* codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -979,7 +1173,9 @@ class AddASTNode : public ASTnode {
 
 public:
   AddASTNode(std::unique_ptr<TimesASTNode> left, std::unique_ptr<AddASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
-  Value* codegen() override {}
+  Value* codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1016,7 +1212,9 @@ class CompASTNode : public ASTnode {
 
 public:
   CompASTNode(std::unique_ptr<AddASTNode> left, std::unique_ptr<CompASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
-  Value* codegen() override {}
+  Value* codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1053,7 +1251,9 @@ class EquivASTNode : public ASTnode {
 
 public:
   EquivASTNode(std::unique_ptr<CompASTNode> left, std::unique_ptr<EquivASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
-  Value* codegen() override {}
+  Value* codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1089,7 +1289,9 @@ class AndASTNode : public ASTnode {
 
 public:
   AndASTNode(std::unique_ptr<EquivASTNode> left, std::unique_ptr<AndASTNode> right) : Left(std::move(left)), Right(std::move(right)) {}
-  Value* codegen() override {}
+  Value* codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1125,7 +1327,9 @@ class OrASTNode : public ASTnode {
 
 public:
   OrASTNode(std::unique_ptr<AndASTNode> left, std::unique_ptr<OrASTNode> right) : Left(std::move(left)), Right(std::move(right)) {}
-  Value* codegen() override {}
+  Value* codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1161,7 +1365,9 @@ class OrExprASTNode : public ExprASTNode {
 
 public:
   OrExprASTNode(std::unique_ptr<OrASTNode> orexpression) : OrExpression(std::move(orexpression)) {}
-  Value *codegen() override {}
+  Value *codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str = "Expr\n";
     for(int i = 0; i<indent; i++) {
@@ -1180,7 +1386,9 @@ public:
   std::vector<std::unique_ptr<ExternASTNode>> ExternList;
   std::vector<std::unique_ptr<DeclASTNode>> DeclList;
   ProgramASTNode(std::vector<std::unique_ptr<ExternASTNode>> externlist, std::vector<std::unique_ptr<DeclASTNode>> decllist) : ExternList(std::move(externlist)), DeclList(std::move(decllist)) {}
-  Value *codegen() override {}
+  Value *codegen() override {
+    //TODO:
+  }
   std::string to_string(int indent) const override {
     std::string str = "Program";
     int newIndent = indent + 1;
@@ -1202,8 +1410,6 @@ public:
   }
 };
 
-/* add other AST nodes as nessasary */
-
 //===----------------------------------------------------------------------===//
 // Recursive Descent Parser - Function call for each production
 //===----------------------------------------------------------------------===//
@@ -1217,12 +1423,13 @@ static void HandleError(const char *str) {
 std::unique_ptr<ParamsASTNode> ParseParams() {
   //Params consist of vector of paramast
   //Parse void case first
+  std::vector<std::unique_ptr<ParamASTNode>> paramList;
   if (CurTok.type == VOID_TOK) {
     getNextToken(); //Consume void
     getNextToken(); //Consume RPAR
-    return std::make_unique<VoidParamsASTNode>();
-  }
-  std::vector<std::unique_ptr<ParamASTNode>> paramList;
+    paramList = std::vector<std::unique_ptr<ParamASTNode>>();
+    return std::make_unique<ParamsASTNode>(std::move(paramList), true);
+  }  
   bool isEpsilon = true;
   //Parse param_list
   while (CurTok.type == INT_TOK || CurTok.type == FLOAT_TOK || CurTok.type == BOOL_TOK) {
@@ -1233,8 +1440,8 @@ std::unique_ptr<ParamsASTNode> ParseParams() {
       HandleError("Expected token IDENT in param production");
       return nullptr;
     }
-    auto ident = std::make_unique<IdentASTNode>(CurTok);
-    paramList.push_back(std::make_unique<ParamASTNode>(varType, std::move(ident))); //Add param to paramList vector
+    std::string ident = CurTok.lexeme;
+    paramList.push_back(std::make_unique<ParamASTNode>(varType, ident)); //Add param to paramList vector
     getNextToken(); //Consume ident
     //Next part would either be another param denoted by a comma, or from follow set it would be a bracket.
     if (CurTok.type != COMMA && CurTok.type != RPAR) {
@@ -1248,7 +1455,7 @@ std::unique_ptr<ParamsASTNode> ParseParams() {
     getNextToken(); //Consume RPAR
     return nullptr;
   }
-  return std::make_unique<ListParamsASTNode>(std::move(paramList));  
+  return std::make_unique<ParamsASTNode>(std::move(paramList), false);  
 };
 
 std::unique_ptr<LocalDeclASTNode> ParseLocalDecl() {
@@ -1258,14 +1465,14 @@ std::unique_ptr<LocalDeclASTNode> ParseLocalDecl() {
     HandleError("Expected token IDENT in local_decl production");
     return nullptr;
   }
-  auto ident = std::make_unique<IdentASTNode>(CurTok);
+  std::string ident = CurTok.lexeme;
   getNextToken();
   if(CurTok.type!=SC) {
     HandleError("Expected token ';' in local_decl production");
     return nullptr;
   }
   getNextToken(); //Consume Semicolon
-  return std::make_unique<LocalDeclASTNode>(varType, std::move(ident));
+  return std::make_unique<LocalDeclASTNode>(varType, ident);
 }
 
 std::vector<std::unique_ptr<LocalDeclASTNode>> ParseLocalDecls() {
@@ -1323,7 +1530,7 @@ std::unique_ptr<RValASTNode> ParseRval() {
     getNextToken(); //Consume )
     return std::move(expr);
   } else if(CurTok.type==IDENT) {
-    auto ident = std::make_unique<IdentASTNode>(CurTok);
+    std::string ident = CurTok.lexeme;
     getNextToken(); //Consume IDENT
     // "(" isnt in the follow set of rval so we can use this to check which IDENT it is
     if(CurTok.type==LPAR) {
@@ -1334,9 +1541,9 @@ std::unique_ptr<RValASTNode> ParseRval() {
         return nullptr;
       }
       getNextToken(); //Consume )
-      return std::make_unique<FunctionCallASTNode>(std::move(ident), std::move(args));
+      return std::make_unique<FunctionCallASTNode>(ident, std::move(args));
     }
-    return std::make_unique<IdentRvalASTNode>(std::move(ident));
+    return std::make_unique<IdentRvalASTNode>(ident);
   } else if(CurTok.type==INT_LIT) {
     TOKEN tok = CurTok;
     int val = std::stoi(CurTok.lexeme);
@@ -1519,11 +1726,10 @@ std::unique_ptr<ExprASTNode> ParseExpr() {
     if(CurTok.type==ASSIGN) {
       //expr ::= IDENT "=" expr
       putBackToken(secondTok);
-      CurTok = ident;
-      auto identAST = std::make_unique<IdentASTNode>(ident);
+      std::string ident = CurTok.lexeme;
       getNextToken(); //Consume IDENT
       getNextToken(); //Consume "="
-      return std::make_unique<AssignmentExprASTNode>(std::move(identAST), std::move(ParseExpr()));
+      return std::make_unique<AssignmentExprASTNode>(ident, std::move(ParseExpr()));
     } else {
       //rval ::= IDENT | IDENT "(" args ")" so would be an operator_or
       putBackToken(secondTok);
@@ -1681,7 +1887,7 @@ std::unique_ptr<BlockASTNode> ParseBlock() {
 std::vector<std::unique_ptr<ExternASTNode>> ParseExternList() {
   std::vector<std::unique_ptr<ExternASTNode>> externList;
   TOKEN type;
-  std::unique_ptr<IdentASTNode> ident;
+  std::string ident;
   //"extern" type_spec IDENT "(" params ")" ";"
   while(CurTok.type == EXTERN) {
     getNextToken(); //Consume "extern"
@@ -1693,7 +1899,7 @@ std::vector<std::unique_ptr<ExternASTNode>> ParseExternList() {
     }
     getNextToken(); //Consumes type_spec
     if (CurTok.type==IDENT) {
-      ident = std::make_unique<IdentASTNode>(CurTok);
+      ident = CurTok.lexeme;
     } else {
       HandleError("Expected IDENT in extern production");
       return std::vector<std::unique_ptr<ExternASTNode>>();
@@ -1710,7 +1916,7 @@ std::vector<std::unique_ptr<ExternASTNode>> ParseExternList() {
       return std::vector<std::unique_ptr<ExternASTNode>>();
     }
     getNextToken(); //Consumes ";"
-    externList.push_back(std::make_unique<ExternASTNode>(type, std::move(ident), std::move(params)));
+    externList.push_back(std::make_unique<ExternASTNode>(type, ident, std::move(params)));
   }
   return std::move(externList);
 };
@@ -1721,24 +1927,23 @@ std::unique_ptr<VarDeclASTNode> ParseVarDecl() {
     return nullptr;
   }
   TOKEN varType = CurTok;
-  TOKEN ident = getNextToken(); //Consume var_type
+  std::string ident = getNextToken().lexeme; //Consume var_type
   if (CurTok.type!=IDENT) {
     HandleError("Expected IDENT in var_decl production");
     return nullptr;
   }
-  auto identAST = std::make_unique<IdentASTNode>(ident);
   getNextToken(); //Consume IDENT
   if(CurTok.type!=SC) {
     HandleError("Expected ';' in var_decl production");
     return nullptr;
   }
   getNextToken(); //Consume ";"
-  return std::make_unique<VarDeclASTNode>(varType, std::move(identAST));
+  return std::make_unique<VarDeclASTNode>(varType, ident);
 }
 
 std::unique_ptr<FunDeclASTNode> ParseFunDecl() {
   TOKEN varType;
-  std::unique_ptr<IdentASTNode> ident;
+  std::string ident;
   if (CurTok.type!=INT_TOK && CurTok.type!=FLOAT_TOK && CurTok.type!=BOOL_TOK && CurTok.type!=VOID_TOK) {
     HandleError("Expected BOOL_TOK, INT_TOK, FLOAT_TOK in fun_decl production");
     return nullptr;
@@ -1747,7 +1952,7 @@ std::unique_ptr<FunDeclASTNode> ParseFunDecl() {
   }
   getNextToken(); //Consumes type_spec
   if (CurTok.type==IDENT) {
-    ident = std::make_unique<IdentASTNode>(CurTok);
+    ident = CurTok.lexeme;
   } else {
     HandleError("Expected IDENT in fun_decl production");
     return nullptr;
@@ -1760,7 +1965,7 @@ std::unique_ptr<FunDeclASTNode> ParseFunDecl() {
   getNextToken(); //Consume "("
   std::unique_ptr<ParamsASTNode> params = std::move(ParseParams()); //Parses params
   std::unique_ptr<BlockASTNode> block = std::move(ParseBlock()); //Parses block
-  return std::make_unique<FunDeclASTNode>(varType, std::move(ident), std::move(params), std::move(block));
+  return std::make_unique<FunDeclASTNode>(varType, ident, std::move(params), std::move(block));
 }
 
 std::vector<std::unique_ptr<DeclASTNode>> ParseDeclList() {
@@ -1808,6 +2013,11 @@ static void parser() {
 static LLVMContext TheContext;
 static IRBuilder<> Builder(TheContext);
 static std::unique_ptr<Module> TheModule;
+
+//Tables for local variables, global variables and functions
+static std::map<std::string, AllocaInst*> NamedValues; 
+static std::map<std::string, Function *> Functions;
+static std::map<std::string, Value *> Globals;
 
 //===----------------------------------------------------------------------===//
 // AST Printer
