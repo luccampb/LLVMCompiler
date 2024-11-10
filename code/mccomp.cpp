@@ -1884,8 +1884,7 @@ Value *ParamsASTNode::codegen() {
 
 Value *ExternASTNode::codegen() {
   if(Functions[FuncName]) {
-    //ERROR: FUNCTION ALREADY DECLARED
-    return nullptr;
+    return HandleErrorValue("Function declared previously.");
   }
   std::vector<Type*> argTypes;
   if(Params->IsVoid) {
@@ -1910,16 +1909,9 @@ Value *ExternASTNode::codegen() {
 
 Value *LocalDeclASTNode::codegen() {
   BasicBlock *currBlock = Builder.GetInsertBlock();
-  Function *function; 
-  if (currBlock && currBlock->getParent()) {
-    function = currBlock->getParent();  // The insertion point is inside a function
-  } else {
-    //ERROR THIS SHOULD NOT HAPPEN, LOCAL DECLS SHOULD ONLY OCCUR IN A FUNCTION
-    function = nullptr;
-  }
+  Function *function = currBlock->getParent();
   if(NamedValues[Ident]) {
-    //ERROR THIS VARIABLE IS DECLARED TWICE
-    return nullptr;
+    return HandleErrorValue("Variable declared twice.");
   }
   Type *type = GetTypeOfToken(VarType);
   AllocaInst *alloca = CreateEntryBlockAlloca(function, Ident, type);
@@ -1947,8 +1939,7 @@ Value *FunDeclASTNode::codegen() {
   Function *TheFunction = TheModule->getFunction(FuncName);
   //If the function is not empty, it has a body (i.e. it has been defined previously)
   if (!TheFunction->empty()) {
-    return nullptr;
-    //ERROR Function cannot be redefined
+    return HandleErrorValue("Function previously defined.");
   }
   std::vector<Type*> argTypes;
   if(Params->IsVoid) {
@@ -1992,13 +1983,12 @@ Value *VarDeclASTNode::codegen() {
   BasicBlock *currBlock = Builder.GetInsertBlock();
   Function *parent = currBlock->getParent();
   if (currBlock && parent) {
-    //ERROR VARDECL IN FUNCTION
-    return nullptr;
+    //Error for me
+    return HandleErrorValue("VARDECL IN FUNCTION??");
   }
   Type *type = GetTypeOfToken(VarType);
   if (Globals.count(Ident)==0) {
-    //ERROR - global redeclared
-    return nullptr;
+    return HandleErrorValue("Global value redeclared.");
   }
   GlobalVariable *g = new GlobalVariable(*TheModule, type, false, GlobalValue::CommonLinkage, Constant::getNullValue(type), Ident);
   Globals[Ident] = g;
@@ -2031,8 +2021,7 @@ Value *IfStmtASTNode::codegen() {
   if(!cond) {
     return nullptr;
   } else if (cond->getType()->isVoidTy()){
-    //ERROR cannot convert void to bool
-    return nullptr;
+    return HandleErrorValue("Cannot convert void value to boolean.");
   }
   Value* comp = Builder.CreateICmpNE(cond, ConstantInt::get(TheContext, APInt(32, 0, true)));
   Builder.CreateCondBr(comp, true_, end_);
@@ -2061,8 +2050,7 @@ Value *ReturnStmtASTNode::codegen() {
     return Builder.CreateRet(retVal);
   } else {
     if(!returnType->isVoidTy()) {
-      //ERROR RETURNING VOID WHEN FUNC ISNT VOID
-      return nullptr;
+      return HandleErrorValue("Function must return a value.");
     }
     return Builder.CreateRetVoid();
   }
@@ -2082,8 +2070,7 @@ Value *AssignmentExprASTNode::codegen() {
     Builder.CreateStore(SubExpr->codegen(), Globals[Ident]);
     return ;
   } else {
-    //ERROR variable not a global or a named value
-    return nullptr;
+    return HandleErrorValue("Reference to undeclared variable.");
   }
 }
 
@@ -2187,7 +2174,6 @@ Value *CompASTNode::codegen() {
 }
 
 Value *EquivASTNode::codegen() {
-  //TODO:
   Value *LHS = Left->codegen();
   Value *RHS = Right->codegen();
   Type *targetType = HighestType(LHS, RHS);
@@ -2229,7 +2215,7 @@ Value *OrASTNode::codegen() {
 }
 
 Value *OrExprASTNode::codegen() {
-  //TODO:
+  return OrExpression->codegen();
 }
 
 Value *ProgramASTNode::codegen() {
