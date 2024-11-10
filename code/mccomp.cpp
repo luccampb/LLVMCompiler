@@ -1847,13 +1847,11 @@ static Value* AttemptCast(Type *goalType, Value *v) {
 }
 
 //TYPES ARE VOID, BOOL -> INT -> FLOAT
-static Type* HighestType(Value *v1, Value *v2) {
-  Type *v1type = v1->getType();
-  Type *v2type = v2->getType();
-  if(v1type->isFloatTy() || v2type->isFloatTy()) {
+static Type* HighestType(Type *t1, Type *t2) {
+  if(t1->isFloatTy() || t2->isFloatTy()) {
     return Builder.getFloatTy();
   }
-  if(v1type->isIntegerTy(32) || v2type->isIntegerTy(32)) {
+  if(t1->isIntegerTy(32) || t2->isIntegerTy(32)) {
     return Builder.getInt32Ty();
   }
   return Builder.getInt1Ty();
@@ -2074,7 +2072,8 @@ Value *ReturnStmtASTNode::codegen() {
   Type *returnType = function->getReturnType();
   if(!Expr) {
     Value *retVal = Expr->codegen();
-    //TODO: CHECK SAME RETURN VALUE AS FUNC DECL
+    Type *type = HighestType(retVal->getType(), returnType);
+    retVal = AttemptCast(type, retVal);
     return Builder.CreateRet(retVal);
   } else {
     if(!returnType->isVoidTy()) {
@@ -2085,29 +2084,70 @@ Value *ReturnStmtASTNode::codegen() {
 }
 
 Value *UnaryOpRValASTNode::codegen() {
-  //TODO:
+  Value *RvalValue = RVal->codegen();
+  if(!RvalValue) {
+    return HandleErrorValue("Rval in unary operator empty.");
+  }
+  if(Op.lexeme=="!") {
+    //Must be a boolean
+    RvalValue = AttemptCast(Builder.getInt1Ty(), RvalValue);
+    if(!RvalValue) {
+      return HandleErrorValue("Unable to cast negated rval to boolean.");
+    }
+    return Builder.CreateNot(RvalValue, "not");
+  } else {
+    if(RvalValue->getType()->isFloatTy()) {
+      return Builder.CreateFNeg(RvalValue, "neg");
+    }
+    return Builder.CreateNeg(RvalValue, "neg");
+  }
 }
 
 Value *AssignmentExprASTNode::codegen() {
-  //CASTING NEEDS TO HAPPEN HERE, MAYBE ASK ON TUES
-  //TODO: CASTING
+  Value *subExpr = SubExpr->codegen();
   if(NamedValues[Ident]) {
-    Builder.CreateStore(SubExpr->codegen(), NamedValues[Ident]);
-    return ;
+    subExpr = AttemptCast(NamedValues[Ident]->getType(), subExpr);
+    if(!subExpr) {
+      return HandleErrorValue("Attempt to assign local variable with expression of unmatching type.");
+    }
+    return Builder.CreateStore(subExpr, NamedValues[Ident]);
   } else if(Globals[Ident]) {
-    Builder.CreateStore(SubExpr->codegen(), Globals[Ident]);
-    return ;
+    subExpr = AttemptCast(Globals[Ident]->getType(), subExpr);
+    if(!subExpr) {
+      return HandleErrorValue("Attempt to assign global variable with expression of unmatching type.");
+    }
+    return Builder.CreateStore(subExpr, Globals[Ident]);
   } else {
     return HandleErrorValue("Reference to undeclared variable.");
   }
 }
 
 Value *ArgListASTNode::codegen() {
-  //TODO:
+  //Handled in FunctionCallASTNode
+  return nullptr;
 }
 
 Value *FunctionCallASTNode::codegen() {
-  //TODO:
+  Function* calleeFunc = TheModule->getFunction(FuncName);
+  std::vector<std::unique_ptr<ExprASTNode>> args = std::move(Args->Exprs);
+  if (!calleeFunc) {
+    return HandleErrorValue("Unknown function referenced");
+  }
+  if (calleeFunc->arg_size() != args.size()) {
+    return HandleErrorValue("Incorrect # arguments passed");
+  }  
+  std::vector<Value*> codegenArgsV;
+  Value *argV;
+  unsigned int idx = 0;
+  for (auto &arg : calleeFunc->args()) {
+    argV = args[idx++]->codegen();
+    argV = AttemptCast(arg.getType(), argV);
+    if (!argV) {
+      return HandleErrorValue("Argument incorrect type for function.");
+    }
+    codegenArgsV.push_back(argV);
+  }
+  return Builder.CreateCall(calleeFunc, codegenArgsV, "calltmp");
 }
 
 Value *IntASTNode::codegen() {
@@ -2128,7 +2168,7 @@ Value *FloatASTNode::codegen() {
 Value *TimesASTNode::codegen() {
   Value *LHS = Left->codegen();
   Value *RHS = Right->codegen();
-  Type *targetType = HighestType(LHS, RHS);
+  Type *targetType = HighestType(LHS->getType(), RHS->getType());
   LHS = AttemptCast(targetType, LHS);
   RHS = AttemptCast(targetType, RHS);
   if(Op.lexeme=="%" && targetType->isFloatTy()) {
@@ -2154,7 +2194,7 @@ Value *TimesASTNode::codegen() {
 Value *AddASTNode::codegen() {
   Value *LHS = Left->codegen();
   Value *RHS = Right->codegen();
-  Type *targetType = HighestType(LHS, RHS);
+  Type *targetType = HighestType(LHS->getType(), RHS->getType());
   LHS = AttemptCast(targetType, LHS);
   RHS = AttemptCast(targetType, RHS);
   if(targetType->isIntegerTy()) {
@@ -2175,7 +2215,7 @@ Value *AddASTNode::codegen() {
 Value *CompASTNode::codegen() {
   Value *LHS = Left->codegen();
   Value *RHS = Right->codegen();
-  Type *targetType = HighestType(LHS, RHS);
+  Type *targetType = HighestType(LHS->getType(), RHS->getType());
   LHS = AttemptCast(targetType, LHS);
   RHS = AttemptCast(targetType, RHS);
   if(targetType->isIntegerTy()) {
@@ -2204,7 +2244,7 @@ Value *CompASTNode::codegen() {
 Value *EquivASTNode::codegen() {
   Value *LHS = Left->codegen();
   Value *RHS = Right->codegen();
-  Type *targetType = HighestType(LHS, RHS);
+  Type *targetType = HighestType(LHS->getType(), RHS->getType());
   LHS = AttemptCast(targetType, LHS);
   RHS = AttemptCast(targetType, RHS);
   if(targetType->isIntegerTy()) {
