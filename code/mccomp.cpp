@@ -1813,10 +1813,10 @@ static Value* AttemptCast(Type *goalType, Value *v) {
   //Goal is bool:
   if (goalType->isIntegerTy(1)) {
     if (v->getType()->isIntegerTy(32)) {
-      return Builder.CreateTrunc(v, Builder.getInt1Ty());
+      return Builder.CreateICmpNE(v, 0, "tobool");
     }
     if (v->getType()->isFloatTy()) {
-      return Builder.CreateFPToUI(v, Builder.getInt1Ty());
+      return Builder.CreateFCmpONE(v, 0, "tobool");
     }
     return v; //v is already a bool
   }  
@@ -1828,7 +1828,7 @@ static Value* AttemptCast(Type *goalType, Value *v) {
     if (v->getType()->isFloatTy()) {
       return Builder.CreateFPToSI(v, Builder.getInt32Ty());
     }
-    return v; //v is already a bool
+    return v; //v is already an int
   }  
   //Goal is float:
   else if (goalType->isFloatTy()) {
@@ -1838,7 +1838,7 @@ static Value* AttemptCast(Type *goalType, Value *v) {
     if (v->getType()->isIntegerTy(1)) {
       return Builder.CreateUIToFP(v, Builder.getFloatTy());
     }
-    return v; //v is already a bool
+    return v; //v is already a float
   }  
   else {
     //VOID
@@ -2009,32 +2009,39 @@ Value *IdentRvalASTNode::codegen() {
 }
 
 Value *ExprStmtASTNode::codegen() {
-  //TODO:
+  if(Expr) {
+    return Expr->codegen();
+  } else {
+    return nullptr;
+  }
 }
 
 Value *IfStmtASTNode::codegen() {
-  Function* function = Builder.GetInsertBlock()->getParent();
-  BasicBlock* true_ = BasicBlock::Create(TheContext, "ifTrue", function);
-  BasicBlock* end_ = BasicBlock::Create(TheContext, "end");
-  BasicBlock* else_ = BasicBlock::Create(TheContext, "else");
-  Value* cond = Expr->codegen();
-  if(!cond) {
-    return nullptr;
-  } else if (cond->getType()->isVoidTy()){
-    return HandleErrorValue("Cannot convert void value to boolean.");
-  }
-  Value* comp = Builder.CreateICmpNE(cond, ConstantInt::get(TheContext, APInt(32, 0, true)));
-  Builder.CreateCondBr(comp, true_, end_);
+  Value *CondV = Expr->codegen();
+  if (!CondV)
+    return HandleErrorValue("Error generating Expr code");
+  CondV = AttemptCast(Builder.getInt1Ty(), CondV);
+  Function *TheFunction = Builder.GetInsertBlock()->getParent();
+  BasicBlock *true_ = BasicBlock::Create(TheContext, "iftrue", TheFunction);
+  BasicBlock *else_ = BasicBlock::Create(TheContext, "else");
+  BasicBlock *end_ = BasicBlock::Create(TheContext, "end");
+  Builder.CreateCondBr(CondV, true_, else_);
   Builder.SetInsertPoint(true_);
-
-  //TODO: IF BODY
-  Value* body = Block->codegen();
-  Builder.Insert(body);
-
-  function -> insert(function -> end(), end_);
+  Value *ThenV = Block->codegen();
+  if (!ThenV)
+    return HandleErrorValue("Error generating Block code");
   Builder.CreateBr(end_);
+  TheFunction->insert(TheFunction->end(), else_);
+  Builder.SetInsertPoint(else_);
+  if(ElseStmt) {
+    Value *ElseV = ElseStmt->codegen();
+    if (!ElseV)
+      return HandleErrorValue("Error generating Else code");;
+  }
+  Builder.CreateBr(end_);
+  TheFunction->insert(TheFunction->end(), end_);
   Builder.SetInsertPoint(end_);
-  //TODO: CODE AFTER IF CONDITION
+  return nullptr;
 }
 
 Value *WhileStmtASTNode::codegen() {
@@ -2197,20 +2204,20 @@ Value *EquivASTNode::codegen() {
 Value *AndASTNode::codegen() {
   Value *LHS = Left->codegen();
   Value *RHS = Right->codegen();
-  //Ands should only be done on booleans so check that the type of LHS and RHS are both bools
-  if(!LHS->getType()->isIntegerTy(1) || !RHS->getType()->isIntegerTy(1)) {
-    return HandleErrorValue("And expression of non boolean items");
-  }
+  //Ands should only be done on booleans. 
+  //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
+  LHS = AttemptCast(Builder.getInt1Ty(), LHS);
+  RHS = AttemptCast(Builder.getInt1Ty(), RHS);
   return Builder.CreateBinOp(Instruction::And, LHS, RHS, "and");
 }
 
 Value *OrASTNode::codegen() {  
   Value *LHS = Left->codegen();
   Value *RHS = Right->codegen();
-  //Ors should only be done on booleans so check that the type of LHS and RHS are both bools
-  if(!LHS->getType()->isIntegerTy(1) || !RHS->getType()->isIntegerTy(1)) {
-    return HandleErrorValue("Or expression of non boolean items");
-  }
+  //Ors should only be done on booleans. 
+  //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
+  LHS = AttemptCast(Builder.getInt1Ty(), LHS);
+  RHS = AttemptCast(Builder.getInt1Ty(), RHS);
   return Builder.CreateBinOp(Instruction::Or, LHS, RHS, "or");
 }
 
