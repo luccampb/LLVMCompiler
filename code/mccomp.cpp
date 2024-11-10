@@ -2017,21 +2017,22 @@ Value *ExprStmtASTNode::codegen() {
 }
 
 Value *IfStmtASTNode::codegen() {
+  //TODO: check with TAs
   Value *CondV = Expr->codegen();
   if (!CondV)
     return HandleErrorValue("Error generating Expr code");
   CondV = AttemptCast(Builder.getInt1Ty(), CondV);
-  Function *TheFunction = Builder.GetInsertBlock()->getParent();
-  BasicBlock *true_ = BasicBlock::Create(TheContext, "iftrue", TheFunction);
+  Function *function = Builder.GetInsertBlock()->getParent();
+  BasicBlock *true_ = BasicBlock::Create(TheContext, "iftrue", function);
   BasicBlock *else_ = BasicBlock::Create(TheContext, "else");
   BasicBlock *end_ = BasicBlock::Create(TheContext, "end");
   Builder.CreateCondBr(CondV, true_, else_);
   Builder.SetInsertPoint(true_);
-  Value *ThenV = Block->codegen();
-  if (!ThenV)
+  Value *TrueV = Block->codegen();
+  if (!TrueV)
     return HandleErrorValue("Error generating Block code");
   Builder.CreateBr(end_);
-  TheFunction->insert(TheFunction->end(), else_);
+  function->insert(function->end(), else_);
   Builder.SetInsertPoint(else_);
   if(ElseStmt) {
     Value *ElseV = ElseStmt->codegen();
@@ -2039,13 +2040,33 @@ Value *IfStmtASTNode::codegen() {
       return HandleErrorValue("Error generating Else code");;
   }
   Builder.CreateBr(end_);
-  TheFunction->insert(TheFunction->end(), end_);
+  function->insert(function->end(), end_);
   Builder.SetInsertPoint(end_);
   return nullptr;
 }
 
 Value *WhileStmtASTNode::codegen() {
-  //TODO:
+  //TODO: check with TAs
+  Value *CondV = Expr->codegen();
+  if (!CondV)
+    return HandleErrorValue("Error generating Expr code");
+  CondV = AttemptCast(Builder.getInt1Ty(), CondV);
+  Function *function = Builder.GetInsertBlock()->getParent();
+  BasicBlock *condition = BasicBlock::Create(TheContext, "cond", function);
+  BasicBlock *true_ = BasicBlock::Create(TheContext, "iftrue", function);
+  BasicBlock *end_ = BasicBlock::Create(TheContext, "end");
+  Builder.CreateBr(condition);
+  Builder.SetInsertPoint(condition);
+  Builder.CreateCondBr(CondV, true_, end_);
+  Builder.SetInsertPoint(true_);
+  Value *TrueV = Statement->codegen();
+  if (!TrueV)
+    return HandleErrorValue("Error generating Statement code");
+  Builder.CreateBr(condition);
+  function->insert(function->end(), end_);
+  Builder.CreateBr(end_);  
+  Builder.SetInsertPoint(end_);
+  return nullptr;
 }
 
 Value *ReturnStmtASTNode::codegen() {
