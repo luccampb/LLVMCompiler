@@ -1808,7 +1808,6 @@ static Type *GetTypeOfToken(TOKEN tok) {
   return nullptr;
 }
 
-//TYPES ARE VOID, BOOL -> INT -> FLOAT
 //A type can be cast up the chain regardless of associated value, but checking needs to happen to go FLOAT -> INT -> BOOL
 static Value* AttemptCast(Type *goalType, Value *v) {
   //Goal is bool:
@@ -1827,7 +1826,7 @@ static Value* AttemptCast(Type *goalType, Value *v) {
       return Builder.CreateZExt(v, Builder.getInt32Ty());
     }
     if (v->getType()->isFloatTy()) {
-      return Builder.CreateFPToUI(v, Builder.getInt32Ty());
+      return Builder.CreateFPToSI(v, Builder.getInt32Ty());
     }
     return v; //v is already a bool
   }  
@@ -1845,6 +1844,19 @@ static Value* AttemptCast(Type *goalType, Value *v) {
     //VOID
     return nullptr;
   }  
+}
+
+//TYPES ARE VOID, BOOL -> INT -> FLOAT
+static Type* HighestType(Value *v1, Value *v2) {
+  Type *v1type = v1->getType();
+  Type *v2type = v2->getType();
+  if(v1type->isFloatTy() || v2type->isFloatTy()) {
+    return Builder.getFloatTy();
+  }
+  if(v1type->isIntegerTy(32) || v2type->isIntegerTy(32)) {
+    return Builder.getInt32Ty();
+  }
+  return Builder.getInt1Ty();
 }
 
 //===----------------------------------------------------------------------===//
@@ -1919,12 +1931,12 @@ Value *BlockASTNode::codegen() {
   //TODO:
   //blocks have their own named values, but we need to preserve ones in previous
   //It needs unique symbol table but also to preserve values previously 
-  NamedValues.clear();
-  for(auto &arg : F->args()){
-    AllocaInst *alloca = CreateEntryBlockAlloca(F, arg.getName().data(), arg.getType());
-    Builder.CreateStore(&arg, alloca);
-    NamedValues[arg.getName().data()] = alloca;
-  }
+  // NamedValues.clear();
+  // for(auto &arg : F->args()){
+  //   AllocaInst *alloca = CreateEntryBlockAlloca(F, arg.getName().data(), arg.getType());
+  //   Builder.CreateStore(&arg, alloca);
+  //   NamedValues[arg.getName().data()] = alloca;
+  // }
   //Handle local decls
 
   //Handle Statements
@@ -2095,31 +2107,125 @@ Value *BoolASTNode::codegen() {
 }
 
 Value *FloatASTNode::codegen() {
-  return ConstantFP::get(TheContext, APFloat(32, Val, false));
+  return ConstantFP::get(TheContext, APFloat(Val));
 }
 
 Value *TimesASTNode::codegen() {
-  //TODO:
+  Value *LHS = Left->codegen();
+  Value *RHS = Right->codegen();
+  Type *targetType = HighestType(LHS, RHS);
+  LHS = AttemptCast(targetType, LHS);
+  RHS = AttemptCast(targetType, RHS);
+  if(Op.lexeme=="%" && targetType->isFloatTy()) {
+    return HandleErrorValue("Modulus operator carried out with floating point numbers");
+  }
+  if(targetType->isIntegerTy()) {
+    if(Op.lexeme=="*") {
+      return Builder.CreateBinOp(Instruction::Mul, LHS, RHS, "multmp");
+    } else if(Op.lexeme=="/") {
+      return Builder.CreateBinOp(Instruction::SDiv, LHS, RHS, "divtmp");
+    } else {
+      return Builder.CreateBinOp(Instruction::SRem, LHS, RHS, "modtmp");
+    } 
+  } else {
+    if(Op.lexeme=="*") {
+      return Builder.CreateBinOp(Instruction::FMul, LHS, RHS, "multmp");
+    } else {
+      return Builder.CreateBinOp(Instruction::FDiv, LHS, RHS, "divtmp");
+    }
+  }
 }
 
 Value *AddASTNode::codegen() {
-  //TODO:
+  Value *LHS = Left->codegen();
+  Value *RHS = Right->codegen();
+  Type *targetType = HighestType(LHS, RHS);
+  LHS = AttemptCast(targetType, LHS);
+  RHS = AttemptCast(targetType, RHS);
+  if(targetType->isIntegerTy()) {
+    if(Op.lexeme=="+") {
+      return Builder.CreateBinOp(Instruction::Add, LHS, RHS, "addtmp");
+    } else {
+      return Builder.CreateBinOp(Instruction::Sub, LHS, RHS, "subtmp");
+    }
+  } else {
+    if(Op.lexeme=="+") {
+      return Builder.CreateBinOp(Instruction::FAdd, LHS, RHS, "addtmp");
+    } else {
+      return Builder.CreateBinOp(Instruction::FSub, LHS, RHS, "subtmp");
+    }
+  }
 }
 
 Value *CompASTNode::codegen() {
-  //TODO:
+  Value *LHS = Left->codegen();
+  Value *RHS = Right->codegen();
+  Type *targetType = HighestType(LHS, RHS);
+  LHS = AttemptCast(targetType, LHS);
+  RHS = AttemptCast(targetType, RHS);
+  if(targetType->isIntegerTy()) {
+    if(Op.lexeme==">") {
+      return Builder.CreateICmpSGT(LHS, RHS, "gt");
+    } else if(Op.lexeme==">=") {
+      return Builder.CreateICmpSGE(LHS, RHS, "ge");
+    } else if(Op.lexeme=="<") {
+      return Builder.CreateICmpSLT(LHS, RHS, "lt");
+    } else {
+      return Builder.CreateICmpSLE(LHS, RHS, "le");
+    }
+  } else {
+    if(Op.lexeme==">") {
+      return Builder.CreateFCmpOGT(LHS, RHS, "gt");
+    } else if(Op.lexeme==">=") {
+      return Builder.CreateFCmpOGE(LHS, RHS, "ge");
+    } else if(Op.lexeme=="<") {
+      return Builder.CreateFCmpOLT(LHS, RHS, "lt");
+    } else {
+      return Builder.CreateFCmpOLE(LHS, RHS, "le");
+    }
+  }
 }
 
 Value *EquivASTNode::codegen() {
   //TODO:
+  Value *LHS = Left->codegen();
+  Value *RHS = Right->codegen();
+  Type *targetType = HighestType(LHS, RHS);
+  LHS = AttemptCast(targetType, LHS);
+  RHS = AttemptCast(targetType, RHS);
+  if(targetType->isIntegerTy()) {
+    if(Op.lexeme=="==") {
+      return Builder.CreateICmpEQ(LHS, RHS, "eq");
+    } else {
+      return Builder.CreateICmpNE(LHS, RHS, "ne");
+    }
+  } else {
+    if(Op.lexeme=="==") {
+      return Builder.CreateFCmpOEQ(LHS, RHS, "eq");
+    } else {
+      return Builder.CreateFCmpONE(LHS, RHS, "ne");
+    }
+  }
 }
 
 Value *AndASTNode::codegen() {
-  //TODO:
+  Value *LHS = Left->codegen();
+  Value *RHS = Right->codegen();
+  //Ands should only be done on booleans so check that the type of LHS and RHS are both bools
+  if(!LHS->getType()->isIntegerTy(1) || !RHS->getType()->isIntegerTy(1)) {
+    return HandleErrorValue("And expression of non boolean items");
+  }
+  return Builder.CreateBinOp(Instruction::And, LHS, RHS, "and");
 }
 
-Value *OrASTNode::codegen() {
-  //TODO:
+Value *OrASTNode::codegen() {  
+  Value *LHS = Left->codegen();
+  Value *RHS = Right->codegen();
+  //Ors should only be done on booleans so check that the type of LHS and RHS are both bools
+  if(!LHS->getType()->isIntegerTy(1) || !RHS->getType()->isIntegerTy(1)) {
+    return HandleErrorValue("Or expression of non boolean items");
+  }
+  return Builder.CreateBinOp(Instruction::Or, LHS, RHS, "or");
 }
 
 Value *OrExprASTNode::codegen() {
