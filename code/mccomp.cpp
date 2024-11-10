@@ -38,6 +38,10 @@ using namespace llvm::sys;
 
 //TODO: 
 // - Finish Codegen
+// ----- Type checking on functions
+// ----- Binary ops
+// ----- Statements
+// ----- ProgramAST
 // - Test Parsing and Codegen
 // - Error handling
 // - Comments
@@ -392,29 +396,6 @@ static TOKEN getNextToken() {
 static void putBackToken(TOKEN tok) { tok_buffer.push_front(tok); }
 
 //===----------------------------------------------------------------------===//
-// Codegen Functions
-//===----------------------------------------------------------------------===//
-
-static AllocaInst* CreateEntryBlockAlloca(Function *TheFunction, const std::string &VarName, Type *Type_) {
-  IRBuilder<> tmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
-  return tmpB.CreateAlloca(Type_, 0, VarName.c_str());
-}
-
-static Type *GetTypeOfToken(TOKEN tok) {
-  switch (tok.type) {
-    case BOOL_TOK:
-      return Builder.getInt1Ty();
-    case INT_TOK:
-      return Builder.getInt32Ty();    
-    case FLOAT_TOK:
-      return Builder.getFloatTy();
-    case VOID_TOK:
-      return Builder.getVoidTy();
-  }
-  return nullptr;
-}
-
-//===----------------------------------------------------------------------===//
 // AST nodes
 //===----------------------------------------------------------------------===//
 
@@ -431,10 +412,7 @@ public:
   std::string Ident;
   TOKEN VarType;
   ParamASTNode(TOKEN vartype, std::string ident) : VarType(vartype), Ident(ident) {}
-  Value *codegen() override {
-    //Handled in FunDeclASTNode and ExternASTNode instead of here due to how functions are created in llvm IR
-    return nullptr;
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Param\n";
     for(int i = 0; i<indent; i++) {
@@ -456,10 +434,7 @@ public:
   bool IsVoid;
   std::vector<std::unique_ptr<ParamASTNode>> ParamList;
   ParamsASTNode(std::vector<std::unique_ptr<ParamASTNode>> paramlist, bool isVoid) : ParamList(std::move(paramlist)), IsVoid(isVoid) {}
-  Value *codegen() override {
-    //Handled in FunDeclASTNode and ExternASTNode instead of here due to how functions are created in llvm IR
-    return nullptr;
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Params";
     if (ParamList.empty() && !IsVoid) {
@@ -487,31 +462,7 @@ class ExternASTNode : public ASTnode {
 
 public:
   ExternASTNode(TOKEN vartype, std::string funcName, std::unique_ptr<ParamsASTNode> params) : VarType(vartype), FuncName(funcName), Params(std::move(params)) {}
-  Value *codegen() override {
-    if(Functions[FuncName]) {
-      //ERROR: FUNCTION ALREADY DECLARED
-      return nullptr;
-    }
-    std::vector<Type*> argTypes;
-    if(Params->IsVoid) {
-      argTypes.push_back(Type::getVoidTy(TheContext));
-    }
-    for(auto&& param : Params->ParamList) {
-      argTypes.push_back(GetTypeOfToken(param->VarType));
-    }
-    Type *funcType = GetTypeOfToken(VarType);
-    FunctionType *FT = FunctionType::get(funcType, argTypes, false);
-    Function *F = Function::Create(FT, Function::ExternalLinkage, FuncName, TheModule.get());
-    unsigned idx = 0;
-    for(auto &arg : F->args()) {
-      arg.setName(Params->ParamList[idx++]->Ident);
-    }    
-    if(verifyFunction(*F)) {
-      return nullptr;
-    }
-    Functions[FuncName] = F;
-    return F;
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Extern\n";
     for(int i = 0; i<indent; i++) {
@@ -541,24 +492,7 @@ class LocalDeclASTNode : public ASTnode {
 
 public:
   LocalDeclASTNode(TOKEN vartype, std::string ident) : VarType(vartype), Ident(ident) {}
-  Value *codegen() override {
-    BasicBlock *currBlock = Builder.GetInsertBlock();
-    Function *function; 
-    if (currBlock && currBlock->getParent()) {
-      function = currBlock->getParent();  // The insertion point is inside a function
-    } else {
-      //ERROR THIS SHOULD NOT HAPPEN, LOCAL DECLS SHOULD ONLY OCCUR IN A FUNCTION
-      function = nullptr;
-    }
-    if(NamedValues[Ident]) {
-      //ERROR THIS VARIABLE IS DECLARED TWICE
-      return nullptr;
-    }
-    Type *type = GetTypeOfToken(VarType);
-    AllocaInst *alloca = CreateEntryBlockAlloca(function, Ident, type);
-    NamedValues[Ident] = alloca;
-    return alloca;
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Local Decl\n";
     for(int i = 0; i<indent; i++) {
@@ -585,13 +519,7 @@ public:
   std::vector<std::unique_ptr<LocalDeclASTNode>> LocalDecls;
   std::vector<std::unique_ptr<StmtASTNode>> Statements;  
   BlockASTNode(std::vector<std::unique_ptr<LocalDeclASTNode>> localdecls, std::vector<std::unique_ptr<StmtASTNode>> statements) : LocalDecls(std::move(localdecls)), Statements(std::move(statements)) {}
-  Value *codegen() override {
-    //TODO:
-    //Handle local decls
-
-    //Handle Statements
-
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Block";
     for(auto&& localD : LocalDecls) {
@@ -635,49 +563,7 @@ class FunDeclASTNode : public DeclASTNode {
 
 public:
   FunDeclASTNode(TOKEN vartype, std::string funcName, std::unique_ptr<ParamsASTNode> params, std::unique_ptr<BlockASTNode> block) : VarType(vartype), FuncName(funcName), Params(std::move(params)), Block(std::move(block)) {}
-  Value *codegen() override {
-    //Cannot do this because it doesnt like when a function is defined with extern then as fundecl
-    Function *TheFunction = TheModule->getFunction(FuncName);
-    //If the function is not empty, it has a body (i.e. it has been defined previously)
-    if (!TheFunction->empty()) {
-      return nullptr;
-      //ERROR Function cannot be redefined
-    }
-    std::vector<Type*> argTypes;
-    if(Params->IsVoid) {
-      argTypes.push_back(Type::getVoidTy(TheContext));
-    }
-    for(auto&& param : Params->ParamList) {
-      argTypes.push_back(GetTypeOfToken(param->VarType));
-    }
-    Type *funcType = GetTypeOfToken(VarType);
-    FunctionType *FT = FunctionType::get(funcType, argTypes, false);
-    Function *F = Function::Create(FT, Function::ExternalLinkage, FuncName, TheModule.get());
-    unsigned idx = 0;
-    for(auto &arg : F->args()) {
-      arg.setName(Params->ParamList[idx++]->Ident);
-    }
-    BasicBlock *BB = BasicBlock::Create(TheContext, "func", F);
-    Builder.SetInsertPoint(BB);
-    NamedValues.clear();
-    for(auto &arg : F->args()){
-      AllocaInst *alloca = CreateEntryBlockAlloca(F, arg.getName().data(), arg.getType());
-      Builder.CreateStore(&arg, alloca);
-      NamedValues[arg.getName().data()] = alloca;
-    }
-    if(Value *retval = Block->codegen()) {
-      if(funcType->isVoidTy()) {
-        Builder.CreateRetVoid();
-      } else {
-        Builder.CreateRet(retval);
-      }      
-    }
-    if(verifyFunction(*F)) {
-      return nullptr;
-    }
-    Functions[FuncName] = F;
-    return F;
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Fun_Decl\n";
     for(int i = 0; i<indent; i++) {
@@ -714,24 +600,7 @@ class VarDeclASTNode : public DeclASTNode {
 
 public:
   VarDeclASTNode(TOKEN vartype, std::string ident) : VarType(vartype), Ident(ident) {}
-  Value *codegen() override {
-    //Only happen outside functions because of local_decl
-    //Check there is not an error
-    BasicBlock *currBlock = Builder.GetInsertBlock();
-    Function *parent = currBlock->getParent();
-    if (currBlock && parent) {
-      //ERROR VARDECL IN FUNCTION
-      return nullptr;
-    }
-    Type *type = GetTypeOfToken(VarType);
-    if (Globals.count(Ident)==0) {
-      //ERROR - global redeclared
-      return nullptr;
-    }
-    GlobalVariable *g = new GlobalVariable(*TheModule, type, false, GlobalValue::CommonLinkage, Constant::getNullValue(type), Ident);
-    Globals[Ident] = g;
-    return g;
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Var_Decl\n";
     for(int i = 0; i<indent; i++) {
@@ -753,9 +622,7 @@ class ElseStmtASTNode : public StmtASTNode {
 
 public:
   ElseStmtASTNode(std::unique_ptr<BlockASTNode> block) : Block(std::move(block)) {}
-  Value *codegen() override {
-    return Block->codegen();
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Else Statement\n";
     if(Block != nullptr) {
@@ -780,17 +647,7 @@ class IdentRvalASTNode : public RValASTNode {
 
 public:
   IdentRvalASTNode(std::string ident) : Ident(ident) {}
-  Value *codegen() override {
-    //Prioritises named values over globals first
-    if(NamedValues[Ident]) {
-      return Builder.CreateLoad(NamedValues[Ident]->getAllocatedType(), NamedValues[Ident], Ident);
-    } else if(Globals[Ident]) {
-      return Builder.CreateLoad(Globals[Ident]->getType(), Globals[Ident], Ident);
-    } else {
-      //ERROR variable not a global or a named value (not defined yet)
-      return nullptr;
-    }
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -812,9 +669,7 @@ class ExprStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
 public:
   ExprStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {}
-  Value *codegen() override {
-    //TODO:
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Expr Statement";
     if(Expr != nullptr) {
@@ -836,31 +691,7 @@ class IfStmtASTNode : public StmtASTNode {
 
 public:
   IfStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<BlockASTNode> block, std::unique_ptr<ElseStmtASTNode> elsestmt) : Expr(std::move(expr)), Block(std::move(block)), ElseStmt(std::move(elsestmt)) {}
-  Value *codegen() override {
-    Function* function = Builder.GetInsertBlock()->getParent();
-    BasicBlock* true_ = BasicBlock::Create(TheContext, "ifTrue", function);
-    BasicBlock* end_ = BasicBlock::Create(TheContext, "end");
-    BasicBlock* else_ = BasicBlock::Create(TheContext, "else");
-    Value* cond = Expr->codegen();
-    if(!cond) {
-      return nullptr;
-    } else if (cond->getType()->isVoidTy()){
-      //ERROR cannot convert void to bool
-      return nullptr;
-    }
-    Value* comp = Builder.CreateICmpNE(cond, ConstantInt::get(TheContext, APInt(32, 0, true)));
-    Builder.CreateCondBr(comp, true_, end_);
-    Builder.SetInsertPoint(true_);
-
-    //TODO: IF BODY
-    Value* body = Block->codegen();
-    Builder.Insert(body);
-
-    function -> insert(function -> end(), end_);
-    Builder.CreateBr(end_);
-    Builder.SetInsertPoint(end_);
-    //TODO: CODE AFTER IF CONDITION
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "If Statement\n";
     for(int i = 0; i<indent; i++) {
@@ -892,9 +723,7 @@ class WhileStmtASTNode : public StmtASTNode {
 
 public:
   WhileStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<StmtASTNode> statement) : Expr(std::move(expr)), Statement(std::move(statement)) {}
-  Value *codegen() override {
-    //TODO:
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "While Statement\n";
     for(int i = 0; i<indent; i++) {
@@ -916,21 +745,7 @@ class ReturnStmtASTNode : public StmtASTNode {
 
 public:
   ReturnStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {}
-  Value *codegen() override {
-    Function *function = Builder.GetInsertBlock()->getParent();
-    Type *returnType = function->getReturnType();
-    if(!Expr) {
-      Value *retVal = Expr->codegen();
-      //TODO: CHECK SAME RETURN VALUE AS FUNC DECL
-      return Builder.CreateRet(retVal);
-    } else {
-      if(!returnType->isVoidTy()) {
-        //ERROR RETURNING VOID WHEN FUNC ISNT VOID
-        return nullptr;
-      }
-      return Builder.CreateRetVoid();
-    }
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Return Statement\n";
     if(Expr!=nullptr) {
@@ -950,9 +765,7 @@ class UnaryOpRValASTNode : public RValASTNode {
   std::unique_ptr<RValASTNode> RVal;
 public:
   UnaryOpRValASTNode(TOKEN op, std::unique_ptr<RValASTNode> rval) : Op(op), RVal(std::move(rval)) {}
-  Value *codegen() override {
-    //TODO:
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Unary Operator Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -976,20 +789,7 @@ class AssignmentExprASTNode : public ExprASTNode {
 
 public:
   AssignmentExprASTNode(std::string ident, std::unique_ptr<ExprASTNode> subexpr) : Ident(ident), SubExpr(std::move(subexpr)) {}
-  Value *codegen() override {
-    //CASTING NEEDS TO HAPPEN HERE, MAYBE ASK ON TUES
-    //TODO: CASTING
-    if(NamedValues[Ident]) {
-      Builder.CreateStore(SubExpr->codegen(), NamedValues[Ident]);
-      return ;
-    } else if(Globals[Ident]) {
-      Builder.CreateStore(SubExpr->codegen(), Globals[Ident]);
-      return ;
-    } else {
-      //ERROR variable not a global or a named value
-      return nullptr;
-    }
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Expr\n";
     for(int i = 0; i<indent; i++) {
@@ -1010,9 +810,7 @@ class ArgListASTNode : public ASTnode {
 public:
   std::vector<std::unique_ptr<ExprASTNode>> Exprs;
   ArgListASTNode(std::vector<std::unique_ptr<ExprASTNode>> exprs) : Exprs(std::move(exprs)) {}
-  Value *codegen() override {
-    //TODO:
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Rval";
     if (Exprs.empty()) {
@@ -1036,9 +834,7 @@ class FunctionCallASTNode : public RValASTNode {
   std::unique_ptr<ArgListASTNode> Args;
 public:
   FunctionCallASTNode(std::string funcname, std::unique_ptr<ArgListASTNode> args) : FuncName(std::move(funcname)), Args(std::move(args)) {}
-  Value *codegen() override {
-    //TODO:
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -1062,9 +858,7 @@ class IntASTNode : public RValASTNode {
 
 public:
   IntASTNode(int val, TOKEN tok) : Val(val), Tok(tok) {}
-  Value *codegen() override {
-    //TODO:
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -1086,9 +880,7 @@ class BoolASTNode : public RValASTNode {
 
 public:
   BoolASTNode(bool val, TOKEN tok) : Val(val), Tok(tok) {}
-  Value *codegen() override {
-    //TODO:
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -1110,9 +902,7 @@ class FloatASTNode : public RValASTNode {
 
 public:
   FloatASTNode(float val, TOKEN tok) : Val(val), Tok(tok) {}
-  Value *codegen() override {
-    //TODO:
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -1134,9 +924,7 @@ class TimesASTNode : public ASTnode {
 
 public:
   TimesASTNode(std::unique_ptr<RValASTNode> left, std::unique_ptr<TimesASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
-  Value* codegen() override {
-    //TODO:
-  }
+  Value* codegen() override {};
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1173,9 +961,7 @@ class AddASTNode : public ASTnode {
 
 public:
   AddASTNode(std::unique_ptr<TimesASTNode> left, std::unique_ptr<AddASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
-  Value* codegen() override {
-    //TODO:
-  }
+  Value* codegen() override {};
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1212,9 +998,7 @@ class CompASTNode : public ASTnode {
 
 public:
   CompASTNode(std::unique_ptr<AddASTNode> left, std::unique_ptr<CompASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
-  Value* codegen() override {
-    //TODO:
-  }
+  Value* codegen() override {};
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1251,9 +1035,7 @@ class EquivASTNode : public ASTnode {
 
 public:
   EquivASTNode(std::unique_ptr<CompASTNode> left, std::unique_ptr<EquivASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
-  Value* codegen() override {
-    //TODO:
-  }
+  Value* codegen() override {};
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1289,9 +1071,7 @@ class AndASTNode : public ASTnode {
 
 public:
   AndASTNode(std::unique_ptr<EquivASTNode> left, std::unique_ptr<AndASTNode> right) : Left(std::move(left)), Right(std::move(right)) {}
-  Value* codegen() override {
-    //TODO:
-  }
+  Value* codegen() override {};
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1327,9 +1107,7 @@ class OrASTNode : public ASTnode {
 
 public:
   OrASTNode(std::unique_ptr<AndASTNode> left, std::unique_ptr<OrASTNode> right) : Left(std::move(left)), Right(std::move(right)) {}
-  Value* codegen() override {
-    //TODO:
-  }
+  Value* codegen() override {};
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1365,9 +1143,7 @@ class OrExprASTNode : public ExprASTNode {
 
 public:
   OrExprASTNode(std::unique_ptr<OrASTNode> orexpression) : OrExpression(std::move(orexpression)) {}
-  Value *codegen() override {
-    //TODO:
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Expr\n";
     for(int i = 0; i<indent; i++) {
@@ -1386,9 +1162,7 @@ public:
   std::vector<std::unique_ptr<ExternASTNode>> ExternList;
   std::vector<std::unique_ptr<DeclASTNode>> DeclList;
   ProgramASTNode(std::vector<std::unique_ptr<ExternASTNode>> externlist, std::vector<std::unique_ptr<DeclASTNode>> decllist) : ExternList(std::move(externlist)), DeclList(std::move(decllist)) {}
-  Value *codegen() override {
-    //TODO:
-  }
+  Value *codegen() override {};
   std::string to_string(int indent) const override {
     std::string str = "Program";
     int newIndent = indent + 1;
@@ -2007,6 +1781,73 @@ static void parser() {
 }
 
 //===----------------------------------------------------------------------===//
+// Codegen Functions
+//===----------------------------------------------------------------------===//
+
+Value *HandleErrorValue(const char *Str) {
+  HandleError(Str);
+  return nullptr;
+}
+
+static AllocaInst* CreateEntryBlockAlloca(Function *TheFunction, const std::string &VarName, Type *Type_) {
+  IRBuilder<> tmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
+  return tmpB.CreateAlloca(Type_, 0, VarName.c_str());
+}
+
+static Type *GetTypeOfToken(TOKEN tok) {
+  switch (tok.type) {
+    case BOOL_TOK:
+      return Builder.getInt1Ty();
+    case INT_TOK:
+      return Builder.getInt32Ty();    
+    case FLOAT_TOK:
+      return Builder.getFloatTy();
+    case VOID_TOK:
+      return Builder.getVoidTy();
+  }
+  return nullptr;
+}
+
+//TYPES ARE VOID, BOOL -> INT -> FLOAT
+//A type can be cast up the chain regardless of associated value, but checking needs to happen to go FLOAT -> INT -> BOOL
+static Value* AttemptCast(Type *goalType, Value *v) {
+  //Goal is bool:
+  if (goalType->isIntegerTy(1)) {
+    if (v->getType()->isIntegerTy(32)) {
+      return Builder.CreateTrunc(v, Builder.getInt1Ty());
+    }
+    if (v->getType()->isFloatTy()) {
+      return Builder.CreateFPToUI(v, Builder.getInt1Ty());
+    }
+    return v; //v is already a bool
+  }  
+  //Goal is int:
+  else if (goalType->isIntegerTy(32)) {
+    if (v->getType()->isIntegerTy(1)) {
+      return Builder.CreateZExt(v, Builder.getInt32Ty());
+    }
+    if (v->getType()->isFloatTy()) {
+      return Builder.CreateFPToUI(v, Builder.getInt32Ty());
+    }
+    return v; //v is already a bool
+  }  
+  //Goal is float:
+  else if (goalType->isFloatTy()) {
+    if (v->getType()->isIntegerTy(32)) {
+      return Builder.CreateSIToFP(v, Builder.getFloatTy());
+    }
+    if (v->getType()->isIntegerTy(1)) {
+      return Builder.CreateUIToFP(v, Builder.getFloatTy());
+    }
+    return v; //v is already a bool
+  }  
+  else {
+    //VOID
+    return nullptr;
+  }  
+}
+
+//===----------------------------------------------------------------------===//
 // Code Generation
 //===----------------------------------------------------------------------===//
 
@@ -2019,6 +1860,272 @@ static std::map<std::string, AllocaInst*> NamedValues;
 static std::map<std::string, Function *> Functions;
 static std::map<std::string, Value *> Globals;
 
+Value *ParamASTNode::codegen() {
+  //Handled in FunDeclASTNode and ExternASTNode instead of here due to how functions are created in llvm IR
+  return nullptr;
+}
+
+Value *ParamsASTNode::codegen() {
+  //Handled in FunDeclASTNode and ExternASTNode instead of here due to how functions are created in llvm IR
+  return nullptr;
+}
+
+Value *ExternASTNode::codegen() {
+  if(Functions[FuncName]) {
+    //ERROR: FUNCTION ALREADY DECLARED
+    return nullptr;
+  }
+  std::vector<Type*> argTypes;
+  if(Params->IsVoid) {
+    argTypes.push_back(Type::getVoidTy(TheContext));
+  }
+  for(auto&& param : Params->ParamList) {
+    argTypes.push_back(GetTypeOfToken(param->VarType));
+  }
+  Type *funcType = GetTypeOfToken(VarType);
+  FunctionType *FT = FunctionType::get(funcType, argTypes, false);
+  Function *F = Function::Create(FT, Function::ExternalLinkage, FuncName, TheModule.get());
+  unsigned idx = 0;
+  for(auto &arg : F->args()) {
+    arg.setName(Params->ParamList[idx++]->Ident);
+  }    
+  if(verifyFunction(*F)) {
+    return nullptr;
+  }
+  Functions[FuncName] = F;
+  return F;
+}
+
+Value *LocalDeclASTNode::codegen() {
+  BasicBlock *currBlock = Builder.GetInsertBlock();
+  Function *function; 
+  if (currBlock && currBlock->getParent()) {
+    function = currBlock->getParent();  // The insertion point is inside a function
+  } else {
+    //ERROR THIS SHOULD NOT HAPPEN, LOCAL DECLS SHOULD ONLY OCCUR IN A FUNCTION
+    function = nullptr;
+  }
+  if(NamedValues[Ident]) {
+    //ERROR THIS VARIABLE IS DECLARED TWICE
+    return nullptr;
+  }
+  Type *type = GetTypeOfToken(VarType);
+  AllocaInst *alloca = CreateEntryBlockAlloca(function, Ident, type);
+  NamedValues[Ident] = alloca;
+  return alloca;
+}
+
+Value *BlockASTNode::codegen() {
+  //TODO:
+  //blocks have their own named values, but we need to preserve ones in previous
+  //It needs unique symbol table but also to preserve values previously 
+  NamedValues.clear();
+  for(auto &arg : F->args()){
+    AllocaInst *alloca = CreateEntryBlockAlloca(F, arg.getName().data(), arg.getType());
+    Builder.CreateStore(&arg, alloca);
+    NamedValues[arg.getName().data()] = alloca;
+  }
+  //Handle local decls
+
+  //Handle Statements
+}
+
+Value *FunDeclASTNode::codegen() {
+  //Cannot do this because it doesnt like when a function is defined with extern then as fundecl
+  Function *TheFunction = TheModule->getFunction(FuncName);
+  //If the function is not empty, it has a body (i.e. it has been defined previously)
+  if (!TheFunction->empty()) {
+    return nullptr;
+    //ERROR Function cannot be redefined
+  }
+  std::vector<Type*> argTypes;
+  if(Params->IsVoid) {
+    argTypes.push_back(Type::getVoidTy(TheContext));
+  }
+  for(auto&& param : Params->ParamList) {
+    argTypes.push_back(GetTypeOfToken(param->VarType));
+  }
+  Type *funcType = GetTypeOfToken(VarType);
+  FunctionType *FT = FunctionType::get(funcType, argTypes, false);
+  Function *F = Function::Create(FT, Function::ExternalLinkage, FuncName, TheModule.get());
+  unsigned idx = 0;
+  for(auto &arg : F->args()) {
+    arg.setName(Params->ParamList[idx++]->Ident);
+  }
+  BasicBlock *BB = BasicBlock::Create(TheContext, "func", F);
+  Builder.SetInsertPoint(BB);
+  NamedValues.clear();
+  for(auto &arg : F->args()){
+    AllocaInst *alloca = CreateEntryBlockAlloca(F, arg.getName().data(), arg.getType());
+    Builder.CreateStore(&arg, alloca);
+    NamedValues[arg.getName().data()] = alloca;
+  }
+  if(Value *retval = Block->codegen()) {
+    if(funcType->isVoidTy()) {
+      Builder.CreateRetVoid();
+    } else {
+      Builder.CreateRet(retval);
+    }      
+  }
+  if(verifyFunction(*F)) {
+    return nullptr;
+  }
+  Functions[FuncName] = F;
+  return F;
+}
+
+Value *VarDeclASTNode::codegen() {
+  //Only happen outside functions because of local_decl
+  //Check there is not an error
+  BasicBlock *currBlock = Builder.GetInsertBlock();
+  Function *parent = currBlock->getParent();
+  if (currBlock && parent) {
+    //ERROR VARDECL IN FUNCTION
+    return nullptr;
+  }
+  Type *type = GetTypeOfToken(VarType);
+  if (Globals.count(Ident)==0) {
+    //ERROR - global redeclared
+    return nullptr;
+  }
+  GlobalVariable *g = new GlobalVariable(*TheModule, type, false, GlobalValue::CommonLinkage, Constant::getNullValue(type), Ident);
+  Globals[Ident] = g;
+  return g;
+}
+
+Value *ElseStmtASTNode::codegen() {
+  return Block->codegen();
+}
+
+Value *IdentRvalASTNode::codegen() {
+  //Prioritises named values over globals first
+  Value *V = Globals[Ident];
+  V = NamedValues[Ident];
+  if (!V)
+    HandleErrorValue("Unknown variable name");
+  return V;
+}
+
+Value *ExprStmtASTNode::codegen() {
+  //TODO:
+}
+
+Value *IfStmtASTNode::codegen() {
+  Function* function = Builder.GetInsertBlock()->getParent();
+  BasicBlock* true_ = BasicBlock::Create(TheContext, "ifTrue", function);
+  BasicBlock* end_ = BasicBlock::Create(TheContext, "end");
+  BasicBlock* else_ = BasicBlock::Create(TheContext, "else");
+  Value* cond = Expr->codegen();
+  if(!cond) {
+    return nullptr;
+  } else if (cond->getType()->isVoidTy()){
+    //ERROR cannot convert void to bool
+    return nullptr;
+  }
+  Value* comp = Builder.CreateICmpNE(cond, ConstantInt::get(TheContext, APInt(32, 0, true)));
+  Builder.CreateCondBr(comp, true_, end_);
+  Builder.SetInsertPoint(true_);
+
+  //TODO: IF BODY
+  Value* body = Block->codegen();
+  Builder.Insert(body);
+
+  function -> insert(function -> end(), end_);
+  Builder.CreateBr(end_);
+  Builder.SetInsertPoint(end_);
+  //TODO: CODE AFTER IF CONDITION
+}
+
+Value *WhileStmtASTNode::codegen() {
+  //TODO:
+}
+
+Value *ReturnStmtASTNode::codegen() {
+  Function *function = Builder.GetInsertBlock()->getParent();
+  Type *returnType = function->getReturnType();
+  if(!Expr) {
+    Value *retVal = Expr->codegen();
+    //TODO: CHECK SAME RETURN VALUE AS FUNC DECL
+    return Builder.CreateRet(retVal);
+  } else {
+    if(!returnType->isVoidTy()) {
+      //ERROR RETURNING VOID WHEN FUNC ISNT VOID
+      return nullptr;
+    }
+    return Builder.CreateRetVoid();
+  }
+}
+
+Value *UnaryOpRValASTNode::codegen() {
+  //TODO:
+}
+
+Value *AssignmentExprASTNode::codegen() {
+  //CASTING NEEDS TO HAPPEN HERE, MAYBE ASK ON TUES
+  //TODO: CASTING
+  if(NamedValues[Ident]) {
+    Builder.CreateStore(SubExpr->codegen(), NamedValues[Ident]);
+    return ;
+  } else if(Globals[Ident]) {
+    Builder.CreateStore(SubExpr->codegen(), Globals[Ident]);
+    return ;
+  } else {
+    //ERROR variable not a global or a named value
+    return nullptr;
+  }
+}
+
+Value *ArgListASTNode::codegen() {
+  //TODO:
+}
+
+Value *FunctionCallASTNode::codegen() {
+  //TODO:
+}
+
+Value *IntASTNode::codegen() {
+  //TODO:
+}
+
+Value *BoolASTNode::codegen() {
+  //TODO:
+}
+
+Value *FloatASTNode::codegen() {
+  //TODO:
+}
+
+Value *TimesASTNode::codegen() {
+  //TODO:
+}
+
+Value *AddASTNode::codegen() {
+  //TODO:
+}
+
+Value *CompASTNode::codegen() {
+  //TODO:
+}
+
+Value *EquivASTNode::codegen() {
+  //TODO:
+}
+
+Value *AndASTNode::codegen() {
+  //TODO:
+}
+
+Value *OrASTNode::codegen() {
+  //TODO:
+}
+
+Value *OrExprASTNode::codegen() {
+  //TODO:
+}
+
+Value *ProgramASTNode::codegen() {
+  //TODO:
+}
 //===----------------------------------------------------------------------===//
 // AST Printer
 //===----------------------------------------------------------------------===//
