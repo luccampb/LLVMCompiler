@@ -2084,15 +2084,18 @@ Value *FunctionCallASTNode::codegen() {
 }
 
 Value *IntASTNode::codegen() {
-  //TODO:
+  return ConstantInt::get(TheContext, APInt(32, Val, false));
 }
 
 Value *BoolASTNode::codegen() {
-  //TODO:
+  if(Val) {
+    return ConstantInt::get(TheContext, APInt(1, 1, false));
+  }
+  return ConstantInt::get(TheContext, APInt(1, 0, false));
 }
 
 Value *FloatASTNode::codegen() {
-  //TODO:
+  return ConstantFP::get(TheContext, APFloat(32, Val, false));
 }
 
 Value *TimesASTNode::codegen() {
