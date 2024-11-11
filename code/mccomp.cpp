@@ -38,15 +38,29 @@ using namespace llvm::sys;
 
 //TODO: 
 // - Finish Codegen
-// ----- Type checking on functions
-// ----- Binary ops
-// ----- Statements
-// ----- ProgramAST
+// ----- Block
+// ----- Check if and whiles
 // - Test Parsing and Codegen
 // - Error handling
 // - Comments
 // - Report
 
+
+//TODO:
+// - In C99 it is valid to have a global variable defined multiple times in the same file. For MiniC you should only
+//   allow a global variable to be defined once. However, re-declaration of a global variable within a local scope
+//   should be allowed.
+// - In C99 int foo() means that the function can be called with 0 or more arguments. For MiniC we will use the
+//   C++ convention where foo() can only be called without any arguments.
+// - Allow only widening conversions when returning an incorrect type (i.e. a type different to that of the declared
+//   type in the function definition) at the end of a function. So for example if an int function returns float this is
+//   a semantic error, but if a float function returns an int promote the int to a float and return without flagging
+//   an error.
+// - In C99, it is also allowed to call a function with differing argument types. e.g: int func(int a){return a;}int
+//   x = func(1.0);. For your compiler, again flag narrowing conversions as errors and allow widening conversions.
+// - Cast non-bools to bools within conditional statements as this is valid C behaviour e.g. if (7) {...} is valid
+//   code. In C99 any number in the conditional greater than 0 evaluates to true. bools should be widened to ints
+//   for cases such as:int x = true + 5;. Then widen true to 1 add to 5.
 FILE *pFile;
 
 //===----------------------------------------------------------------------===//
@@ -1925,6 +1939,13 @@ Value *BlockASTNode::codegen() {
   //No test files contain any variable declarations within non function blocks so unclear on how to handle
   //Will handle like how most programming languages handle it (can be referenced outside of block if all code paths declare it)
   //This will need to be done in the grammar rule before the block
+
+  //Expected returns:
+  // - fun_decl - return values of function
+  // - if - value to indicate success
+  // - else - value to indicate success
+  // - stmt - value to indicate success
+
   //Handle local decls vector
   Value *declV;
   for(auto &&decl : LocalDecls){
