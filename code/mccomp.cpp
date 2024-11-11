@@ -488,9 +488,9 @@ public:
 
 class LocalDeclASTNode : public ASTnode {
   TOKEN VarType;
-  std::string Ident;
 
 public:
+  std::string Ident;
   LocalDeclASTNode(TOKEN vartype, std::string ident) : VarType(vartype), Ident(ident) {}
   Value *codegen() override {};
   std::string to_string(int indent) const override {
@@ -1918,22 +1918,39 @@ Value *LocalDeclASTNode::codegen() {
 }
 
 Value *BlockASTNode::codegen() {
-  //TODO:
-  //blocks have their own named values, but we need to preserve ones in previous
+  //TODO: Ask about how to do block. Should variables have they vaues updated now?
   //It needs unique symbol table but also to preserve values previously 
-  // NamedValues.clear();
-  // for(auto &arg : F->args()){
-  //   AllocaInst *alloca = CreateEntryBlockAlloca(F, arg.getName().data(), arg.getType());
-  //   Builder.CreateStore(&arg, alloca);
-  //   NamedValues[arg.getName().data()] = alloca;
-  // }
-  //Handle local decls
-
-  //Handle Statements
+  //If block is from fun decl NamedValues[] will already be clear
+  //Otherwise we dont want to clear as we want to preserve the function's variables
+  //No test files contain any variable declarations within non function blocks so unclear on how to handle
+  //Will handle like how most programming languages handle it (can be referenced outside of block if all code paths declare it)
+  //This will need to be done in the grammar rule before the block
+  //Handle local decls vector
+  Value *declV;
+  for(auto &&decl : LocalDecls){
+    declV = decl->codegen();
+    if(!declV) {
+      return nullptr;
+    }
+  }
+  //Handle Statements vector
+  std::vector<Value*> returnStmts;
+  Value *stmtV;
+  for(std::unique_ptr<StmtASTNode> &stmt : Statements){
+    stmtV = stmt->codegen();
+    if(!stmtV) {
+      return HandleErrorValue("Error generating statement.");
+    }
+    try {
+      dynamic_cast<ReturnStmtASTNode&>(*stmt);
+      returnStmts.push_back(stmtV);
+    } catch(...) {}
+  }
+  //??
+  return nullptr;
 }
 
 Value *FunDeclASTNode::codegen() {
-  //Cannot do this because it doesnt like when a function is defined with extern then as fundecl
   Function *TheFunction = TheModule->getFunction(FuncName);
   //If the function is not empty, it has a body (i.e. it has been defined previously)
   if (!TheFunction->empty()) {
@@ -2074,6 +2091,9 @@ Value *ReturnStmtASTNode::codegen() {
     Value *retVal = Expr->codegen();
     Type *type = HighestType(retVal->getType(), returnType);
     retVal = AttemptCast(type, retVal);
+    if(!retVal) {
+      return HandleErrorValue("Function returns value of invalid type.");
+    }
     return Builder.CreateRet(retVal);
   } else {
     if(!returnType->isVoidTy()) {
@@ -2287,7 +2307,16 @@ Value *OrExprASTNode::codegen() {
 }
 
 Value *ProgramASTNode::codegen() {
-  //TODO:
+  for(auto &&extern_ : ExternList) {
+    extern_->codegen();
+  }
+  for(auto &&decl : DeclList) {
+    decl->codegen();
+    if(!decl) {
+      return HandleErrorValue("Error generating declarations.");
+    }
+  }
+  return nullptr;
 }
 //===----------------------------------------------------------------------===//
 // AST Printer
