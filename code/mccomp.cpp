@@ -1539,10 +1539,9 @@ std::unique_ptr<ExprASTNode> ParseExpr() {
     if(CurTok.type==ASSIGN) {
       //expr ::= IDENT "=" expr
       putBackToken(secondTok);
-      std::string ident = CurTok.lexeme;
       getNextToken(); //Consume IDENT
       getNextToken(); //Consume "="
-      return std::make_unique<AssignmentExprASTNode>(ident, std::move(ParseExpr()));
+      return std::make_unique<AssignmentExprASTNode>(ident.lexeme, std::move(ParseExpr()));
     } else {
       //rval ::= IDENT | IDENT "(" args ")" so would be an operator_or
       putBackToken(secondTok);
@@ -1873,7 +1872,7 @@ static Value* AttemptCast(Type *goalType, Value *v) {
       return Builder.CreateSIToFP(v, Builder.getFloatTy());
     }
     if (v->getType()->isIntegerTy(1)) {
-      return Builder.CreateUIToFP(v, Builder.getFloatTy());
+      return Builder.CreateSIToFP(v, Builder.getFloatTy());
     }
     return v; //v is already a float
   }  
@@ -1999,11 +1998,9 @@ Value *BlockASTNode::codegen() {
 }
 
 Value *FunDeclASTNode::codegen() {
-  Function *TheFunction = TheModule->getFunction(FuncName);
-  //If the function is not empty, it has a body (i.e. it has been defined previously)
-  if (!TheFunction->empty()) {
-    return HandleErrorValue("Function previously defined.");
-  }
+  if(Functions.count(FuncName)!=0) {
+    return HandleErrorValue("Function already declared. ");
+  } 
   std::vector<Type*> argTypes;
   if(Params->IsVoid) {
     argTypes.push_back(Type::getVoidTy(TheContext));
@@ -2169,7 +2166,7 @@ Value *UnaryOpRValASTNode::codegen() {
 Value *AssignmentExprASTNode::codegen() {
   Value *subExpr = SubExpr->codegen();
   if(NamedValues[Ident]) {
-    subExpr = AttemptCast(NamedValues[Ident]->getType(), subExpr);
+    subExpr = AttemptCast(NamedValues[Ident]->getAllocatedType(), subExpr);
     if(!subExpr) {
       return HandleErrorValue("Attempt to assign local variable with expression of unmatching type.");
     }
@@ -2181,6 +2178,7 @@ Value *AssignmentExprASTNode::codegen() {
     }
     return Builder.CreateStore(subExpr, Globals[Ident]);
   } else {
+    // std::cout << Ident << std::endl;
     return HandleErrorValue("Reference to undeclared variable.");
   }
 }
@@ -2230,6 +2228,9 @@ Value *FloatASTNode::codegen() {
 
 Value *TimesASTNode::codegen() {
   Value *LHS = Left->codegen();
+  if(!Right) {
+    return LHS;
+  }
   Value *RHS = Right->codegen();
   Type *targetType = HighestType(LHS->getType(), RHS->getType());
   LHS = AttemptCast(targetType, LHS);
@@ -2256,6 +2257,9 @@ Value *TimesASTNode::codegen() {
 
 Value *AddASTNode::codegen() {
   Value *LHS = Left->codegen();
+  if(!Right) {
+    return LHS;
+  }
   Value *RHS = Right->codegen();
   Type *targetType = HighestType(LHS->getType(), RHS->getType());
   LHS = AttemptCast(targetType, LHS);
@@ -2277,56 +2281,69 @@ Value *AddASTNode::codegen() {
 
 Value *CompASTNode::codegen() {
   Value *LHS = Left->codegen();
+  if(!Right) {
+    return LHS;
+  }
   Value *RHS = Right->codegen();
   Type *targetType = HighestType(LHS->getType(), RHS->getType());
   LHS = AttemptCast(targetType, LHS);
   RHS = AttemptCast(targetType, RHS);
+  Value *temp;
   if(targetType->isIntegerTy()) {
     if(Op.lexeme==">") {
-      return Builder.CreateICmpSGT(LHS, RHS, "gt");
+      temp = Builder.CreateICmpSGT(LHS, RHS, "gt");
     } else if(Op.lexeme==">=") {
-      return Builder.CreateICmpSGE(LHS, RHS, "ge");
+      temp = Builder.CreateICmpSGE(LHS, RHS, "ge");
     } else if(Op.lexeme=="<") {
-      return Builder.CreateICmpSLT(LHS, RHS, "lt");
+      temp = Builder.CreateICmpSLT(LHS, RHS, "lt");
     } else {
-      return Builder.CreateICmpSLE(LHS, RHS, "le");
+      temp = Builder.CreateICmpSLE(LHS, RHS, "le");
     }
   } else {
     if(Op.lexeme==">") {
-      return Builder.CreateFCmpOGT(LHS, RHS, "gt");
+      temp = Builder.CreateFCmpUGT(LHS, RHS, "gt");
     } else if(Op.lexeme==">=") {
-      return Builder.CreateFCmpOGE(LHS, RHS, "ge");
+      temp = Builder.CreateFCmpUGE(LHS, RHS, "ge");
     } else if(Op.lexeme=="<") {
-      return Builder.CreateFCmpOLT(LHS, RHS, "lt");
+      temp = Builder.CreateFCmpULT(LHS, RHS, "lt");
     } else {
-      return Builder.CreateFCmpOLE(LHS, RHS, "le");
+      temp = Builder.CreateFCmpULE(LHS, RHS, "le");
     }
   }
+  return Builder.CreateUIToFP(temp, Type::getFloatTy(TheContext), "booltmp");
 }
 
 Value *EquivASTNode::codegen() {
   Value *LHS = Left->codegen();
+  if(!Right) {
+    return LHS;
+  }
   Value *RHS = Right->codegen();
   Type *targetType = HighestType(LHS->getType(), RHS->getType());
   LHS = AttemptCast(targetType, LHS);
   RHS = AttemptCast(targetType, RHS);
+  Value *temp;
   if(targetType->isIntegerTy()) {
     if(Op.lexeme=="==") {
-      return Builder.CreateICmpEQ(LHS, RHS, "eq");
+      temp = Builder.CreateICmpEQ(LHS, RHS, "eq");
     } else {
-      return Builder.CreateICmpNE(LHS, RHS, "ne");
+      temp = Builder.CreateICmpNE(LHS, RHS, "ne");
     }
   } else {
     if(Op.lexeme=="==") {
-      return Builder.CreateFCmpOEQ(LHS, RHS, "eq");
+      temp = Builder.CreateFCmpUEQ(LHS, RHS, "eq");
     } else {
-      return Builder.CreateFCmpONE(LHS, RHS, "ne");
+      temp = Builder.CreateFCmpUNE(LHS, RHS, "ne");
     }
   }
+  return Builder.CreateUIToFP(temp, Type::getFloatTy(TheContext), "booltmp");
 }
 
 Value *AndASTNode::codegen() {
   Value *LHS = Left->codegen();
+  if(!Right) {
+    return LHS;
+  }
   Value *RHS = Right->codegen();
   //Ands should only be done on booleans. 
   //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
@@ -2337,6 +2354,9 @@ Value *AndASTNode::codegen() {
 
 Value *OrASTNode::codegen() {  
   Value *LHS = Left->codegen();
+  if(!Right) {
+    return LHS;
+  }
   Value *RHS = Right->codegen();
   //Ors should only be done on booleans. 
   //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
@@ -2403,7 +2423,7 @@ int main(int argc, char **argv) {
 
   // Run the parser now.
   std::unique_ptr<ProgramASTNode> prog = parser();
-  llvm::outs() << prog->to_string(1) << "\n";
+  // llvm::outs() << prog->to_string(1) << "\n";
   fprintf(stderr, "Parsing Finished\n");
   prog->codegen();
 
