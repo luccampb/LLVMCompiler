@@ -47,11 +47,6 @@ using namespace llvm::sys;
 
 
 //TODO:
-// - In C99 it is valid to have a global variable defined multiple times in the same file. For MiniC you should only
-//   allow a global variable to be defined once. However, re-declaration of a global variable within a local scope
-//   should be allowed.
-// - In C99 int foo() means that the function can be called with 0 or more arguments. For MiniC we will use the
-//   C++ convention where foo() can only be called without any arguments.
 // - Allow only widening conversions when returning an incorrect type (i.e. a type different to that of the declared
 //   type in the function definition) at the end of a function. So for example if an int function returns float this is
 //   a semantic error, but if a float function returns an int promote the int to a float and return without flagging
@@ -410,8 +405,30 @@ static TOKEN getNextToken() {
 static void putBackToken(TOKEN tok) { tok_buffer.push_front(tok); }
 
 //===----------------------------------------------------------------------===//
+// Codegen Stores
+//===----------------------------------------------------------------------===//
+
+static LLVMContext TheContext;
+static IRBuilder<> Builder(TheContext);
+static std::unique_ptr<Module> TheModule;
+
+//Tables for local variables, global variables and functions
+static std::map<std::string, AllocaInst*> NamedValues; 
+static std::map<std::string, Function *> Functions;
+static std::map<std::string, Value *> Globals;
+
+//===----------------------------------------------------------------------===//
 // AST nodes
 //===----------------------------------------------------------------------===//
+
+enum StmtType {
+  EXPR = 1,
+  BLOCK = 2,
+  IFSTMT = 3,
+  ELSESTMT = 4,
+  WHILESTMT = 5,
+  RETSTMT = 6
+};
 
 /// ASTnode - Base class for all AST nodes.
 class ASTnode {
@@ -426,7 +443,7 @@ public:
   std::string Ident;
   TOKEN VarType;
   ParamASTNode(TOKEN vartype, std::string ident) : VarType(vartype), Ident(ident) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Param\n";
     for(int i = 0; i<indent; i++) {
@@ -448,7 +465,7 @@ public:
   bool IsVoid;
   std::vector<std::unique_ptr<ParamASTNode>> ParamList;
   ParamsASTNode(std::vector<std::unique_ptr<ParamASTNode>> paramlist, bool isVoid) : ParamList(std::move(paramlist)), IsVoid(isVoid) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Params";
     if (ParamList.empty() && !IsVoid) {
@@ -476,7 +493,7 @@ class ExternASTNode : public ASTnode {
 
 public:
   ExternASTNode(TOKEN vartype, std::string funcName, std::unique_ptr<ParamsASTNode> params) : VarType(vartype), FuncName(funcName), Params(std::move(params)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Extern\n";
     for(int i = 0; i<indent; i++) {
@@ -506,7 +523,7 @@ class LocalDeclASTNode : public ASTnode {
 public:
   std::string Ident;
   LocalDeclASTNode(TOKEN vartype, std::string ident) : VarType(vartype), Ident(ident) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Local Decl\n";
     for(int i = 0; i<indent; i++) {
@@ -525,15 +542,17 @@ public:
 
 class StmtASTNode : public ASTnode {
 public:
+  StmtType stmtType; 
   virtual ~StmtASTNode() {}
 };
 
 class BlockASTNode : public StmtASTNode {
 public:
+  StmtType stmtType = BLOCK;
   std::vector<std::unique_ptr<LocalDeclASTNode>> LocalDecls;
   std::vector<std::unique_ptr<StmtASTNode>> Statements;  
   BlockASTNode(std::vector<std::unique_ptr<LocalDeclASTNode>> localdecls, std::vector<std::unique_ptr<StmtASTNode>> statements) : LocalDecls(std::move(localdecls)), Statements(std::move(statements)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Block";
     for(auto&& localD : LocalDecls) {
@@ -562,7 +581,7 @@ public:
 class DeclASTNode : public ASTnode {
 public:
   DeclASTNode() {}
-  Value *codegen() override {}
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     return "Decl";
   }
@@ -577,7 +596,7 @@ class FunDeclASTNode : public DeclASTNode {
 
 public:
   FunDeclASTNode(TOKEN vartype, std::string funcName, std::unique_ptr<ParamsASTNode> params, std::unique_ptr<BlockASTNode> block) : VarType(vartype), FuncName(funcName), Params(std::move(params)), Block(std::move(block)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Fun_Decl\n";
     for(int i = 0; i<indent; i++) {
@@ -614,7 +633,7 @@ class VarDeclASTNode : public DeclASTNode {
 
 public:
   VarDeclASTNode(TOKEN vartype, std::string ident) : VarType(vartype), Ident(ident) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Var_Decl\n";
     for(int i = 0; i<indent; i++) {
@@ -632,11 +651,12 @@ public:
 };
 
 class ElseStmtASTNode : public StmtASTNode {
-  std::unique_ptr<BlockASTNode> Block;
 
 public:
+  std::unique_ptr<BlockASTNode> Block;
+  StmtType stmtType = ELSESTMT; 
   ElseStmtASTNode(std::unique_ptr<BlockASTNode> block) : Block(std::move(block)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Else Statement\n";
     if(Block != nullptr) {
@@ -661,7 +681,7 @@ class IdentRvalASTNode : public RValASTNode {
 
 public:
   IdentRvalASTNode(std::string ident) : Ident(ident) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -682,8 +702,9 @@ public:
 class ExprStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
 public:
+  StmtType stmtType = EXPR; 
   ExprStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Expr Statement";
     if(Expr != nullptr) {
@@ -700,12 +721,13 @@ public:
 
 class IfStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
-  std::unique_ptr<BlockASTNode> Block;
-  std::unique_ptr<ElseStmtASTNode> ElseStmt;
 
 public:
+  StmtType stmtType = IFSTMT; 
+  std::unique_ptr<BlockASTNode> Block;
+  std::unique_ptr<ElseStmtASTNode> ElseStmt;
   IfStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<BlockASTNode> block, std::unique_ptr<ElseStmtASTNode> elsestmt) : Expr(std::move(expr)), Block(std::move(block)), ElseStmt(std::move(elsestmt)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "If Statement\n";
     for(int i = 0; i<indent; i++) {
@@ -736,8 +758,9 @@ class WhileStmtASTNode : public StmtASTNode {
   std::unique_ptr<StmtASTNode> Statement;
 
 public:
+  StmtType stmtType = WHILESTMT; 
   WhileStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<StmtASTNode> statement) : Expr(std::move(expr)), Statement(std::move(statement)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "While Statement\n";
     for(int i = 0; i<indent; i++) {
@@ -758,8 +781,9 @@ class ReturnStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
 
 public:
+  StmtType stmtType = RETSTMT; 
   ReturnStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Return Statement\n";
     if(Expr!=nullptr) {
@@ -779,7 +803,7 @@ class UnaryOpRValASTNode : public RValASTNode {
   std::unique_ptr<RValASTNode> RVal;
 public:
   UnaryOpRValASTNode(TOKEN op, std::unique_ptr<RValASTNode> rval) : Op(op), RVal(std::move(rval)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Unary Operator Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -803,7 +827,7 @@ class AssignmentExprASTNode : public ExprASTNode {
 
 public:
   AssignmentExprASTNode(std::string ident, std::unique_ptr<ExprASTNode> subexpr) : Ident(ident), SubExpr(std::move(subexpr)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Expr\n";
     for(int i = 0; i<indent; i++) {
@@ -824,7 +848,7 @@ class ArgListASTNode : public ASTnode {
 public:
   std::vector<std::unique_ptr<ExprASTNode>> Exprs;
   ArgListASTNode(std::vector<std::unique_ptr<ExprASTNode>> exprs) : Exprs(std::move(exprs)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Rval";
     if (Exprs.empty()) {
@@ -848,7 +872,7 @@ class FunctionCallASTNode : public RValASTNode {
   std::unique_ptr<ArgListASTNode> Args;
 public:
   FunctionCallASTNode(std::string funcname, std::unique_ptr<ArgListASTNode> args) : FuncName(std::move(funcname)), Args(std::move(args)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -872,7 +896,7 @@ class IntASTNode : public RValASTNode {
 
 public:
   IntASTNode(int val, TOKEN tok) : Val(val), Tok(tok) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -894,7 +918,7 @@ class BoolASTNode : public RValASTNode {
 
 public:
   BoolASTNode(bool val, TOKEN tok) : Val(val), Tok(tok) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -916,7 +940,7 @@ class FloatASTNode : public RValASTNode {
 
 public:
   FloatASTNode(float val, TOKEN tok) : Val(val), Tok(tok) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
     for(int i = 0; i<indent; i++) {
@@ -938,7 +962,7 @@ class TimesASTNode : public ASTnode {
 
 public:
   TimesASTNode(std::unique_ptr<RValASTNode> left, std::unique_ptr<TimesASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
-  Value* codegen() override {};
+  Value* codegen() override;
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -975,7 +999,7 @@ class AddASTNode : public ASTnode {
 
 public:
   AddASTNode(std::unique_ptr<TimesASTNode> left, std::unique_ptr<AddASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
-  Value* codegen() override {};
+  Value* codegen() override;
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1012,7 +1036,7 @@ class CompASTNode : public ASTnode {
 
 public:
   CompASTNode(std::unique_ptr<AddASTNode> left, std::unique_ptr<CompASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
-  Value* codegen() override {};
+  Value* codegen() override;
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1049,7 +1073,7 @@ class EquivASTNode : public ASTnode {
 
 public:
   EquivASTNode(std::unique_ptr<CompASTNode> left, std::unique_ptr<EquivASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
-  Value* codegen() override {};
+  Value* codegen() override;
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1085,7 +1109,7 @@ class AndASTNode : public ASTnode {
 
 public:
   AndASTNode(std::unique_ptr<EquivASTNode> left, std::unique_ptr<AndASTNode> right) : Left(std::move(left)), Right(std::move(right)) {}
-  Value* codegen() override {};
+  Value* codegen() override;
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1121,7 +1145,7 @@ class OrASTNode : public ASTnode {
 
 public:
   OrASTNode(std::unique_ptr<AndASTNode> left, std::unique_ptr<OrASTNode> right) : Left(std::move(left)), Right(std::move(right)) {}
-  Value* codegen() override {};
+  Value* codegen() override;
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
@@ -1157,7 +1181,7 @@ class OrExprASTNode : public ExprASTNode {
 
 public:
   OrExprASTNode(std::unique_ptr<OrASTNode> orexpression) : OrExpression(std::move(orexpression)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Expr\n";
     for(int i = 0; i<indent; i++) {
@@ -1176,7 +1200,7 @@ public:
   std::vector<std::unique_ptr<ExternASTNode>> ExternList;
   std::vector<std::unique_ptr<DeclASTNode>> DeclList;
   ProgramASTNode(std::vector<std::unique_ptr<ExternASTNode>> externlist, std::vector<std::unique_ptr<DeclASTNode>> decllist) : ExternList(std::move(externlist)), DeclList(std::move(decllist)) {}
-  Value *codegen() override {};
+  Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Program";
     int newIndent = indent + 1;
@@ -1206,6 +1230,7 @@ public:
 static void HandleError(const char *str) {
   std::string msg = "Error on line: " + std::to_string(CurTok.lineNo) + " with token: " + CurTok.lexeme + ": " + str; 
   fprintf(stderr, "%s\n", msg.c_str());
+  exit(0);
 }
 
 std::unique_ptr<ParamsASTNode> ParseParams() {
@@ -1781,8 +1806,7 @@ std::vector<std::unique_ptr<DeclASTNode>> ParseDeclList() {
 };
 
 // program ::= extern_list decl_list
-static void parser() {
-  // add body
+static std::unique_ptr<ProgramASTNode> parser() {
   std::vector<std::unique_ptr<ExternASTNode>> externList;
   if (CurTok.type == EXTERN) {
     externList = std::move(ParseExternList());
@@ -1790,8 +1814,7 @@ static void parser() {
     externList = std::vector<std::unique_ptr<ExternASTNode>>();
   }  
   std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(ParseDeclList());
-  std::unique_ptr<ProgramASTNode> prog = std::make_unique<ProgramASTNode>(std::move(externList), std::move(declList));
-  llvm::outs() << prog->to_string(1) << "\n";
+  return std::make_unique<ProgramASTNode>(std::move(externList), std::move(declList)); 
 }
 
 //===----------------------------------------------------------------------===//
@@ -1871,18 +1894,36 @@ static Type* HighestType(Type *t1, Type *t2) {
   return Builder.getInt1Ty();
 }
 
+static bool CheckAllPathsReturn(BlockASTNode* block) {
+  //Only care about the block's statements
+  for(auto &&stmt : block->Statements) {
+    if(stmt->stmtType==RETSTMT) {
+      return true;
+    }
+    //Must be either if/while/block/expr
+    if(stmt->stmtType==BLOCK) {
+      //Can static cast because we know it must be a BlockASTNode
+      BlockASTNode* subBlock = static_cast<BlockASTNode*>(stmt.get());
+      return CheckAllPathsReturn(subBlock);
+    }
+    if(stmt->stmtType==IFSTMT) {
+      //Can static cast because we know it must be an IfStmtASTNode
+      IfStmtASTNode* ifBlock = static_cast<IfStmtASTNode*>(stmt.get());
+      if(!ifBlock->ElseStmt) {
+        continue; //If it has no else stmt it doesnt matter whether the if has a return statement or not
+      } else {
+        if(CheckAllPathsReturn(ifBlock->Block.get()) && CheckAllPathsReturn(ifBlock->ElseStmt->Block.get())){
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
 //===----------------------------------------------------------------------===//
 // Code Generation
 //===----------------------------------------------------------------------===//
-
-static LLVMContext TheContext;
-static IRBuilder<> Builder(TheContext);
-static std::unique_ptr<Module> TheModule;
-
-//Tables for local variables, global variables and functions
-static std::map<std::string, AllocaInst*> NamedValues; 
-static std::map<std::string, Function *> Functions;
-static std::map<std::string, Value *> Globals;
 
 Value *ParamASTNode::codegen() {
   //Handled in FunDeclASTNode and ExternASTNode instead of here due to how functions are created in llvm IR
@@ -1932,43 +1973,29 @@ Value *LocalDeclASTNode::codegen() {
 }
 
 Value *BlockASTNode::codegen() {
-  //TODO: Ask about how to do block. Should variables have they vaues updated now?
-  //It needs unique symbol table but also to preserve values previously 
-  //If block is from fun decl NamedValues[] will already be clear
-  //Otherwise we dont want to clear as we want to preserve the function's variables
-  //No test files contain any variable declarations within non function blocks so unclear on how to handle
-  //Will handle like how most programming languages handle it (can be referenced outside of block if all code paths declare it)
-  //This will need to be done in the grammar rule before the block
-
-  //Expected returns:
-  // - fun_decl - return values of function
-  // - if - value to indicate success
-  // - else - value to indicate success
-  // - stmt - value to indicate success
-
+  std::map<std::string, AllocaInst*> OldNamedVals;
+  OldNamedVals.insert(NamedValues.begin(), NamedValues.end());
   //Handle local decls vector
-  Value *declV;
   for(auto &&decl : LocalDecls){
-    declV = decl->codegen();
-    if(!declV) {
-      return nullptr;
-    }
+    decl->codegen();
   }
   //Handle Statements vector
-  std::vector<Value*> returnStmts;
   Value *stmtV;
-  for(std::unique_ptr<StmtASTNode> &stmt : Statements){
+  for(auto &&stmt : Statements){
     stmtV = stmt->codegen();
     if(!stmtV) {
       return HandleErrorValue("Error generating statement.");
     }
-    try {
-      dynamic_cast<ReturnStmtASTNode&>(*stmt);
-      returnStmts.push_back(stmtV);
-    } catch(...) {}
   }
-  //??
-  return nullptr;
+  //Now want to remove any new variables from NamedVals;
+  for(auto &&kvp : NamedValues) {
+    if(OldNamedVals.count(kvp.first)==1) {
+      OldNamedVals[kvp.first] = NamedValues[kvp.first];
+    }
+  }
+  NamedValues.clear();
+  NamedValues.insert(OldNamedVals.begin(), OldNamedVals.end());
+  return Constant::getNullValue(Builder.getInt1Ty());
 }
 
 Value *FunDeclASTNode::codegen() {
@@ -1999,15 +2026,12 @@ Value *FunDeclASTNode::codegen() {
     Builder.CreateStore(&arg, alloca);
     NamedValues[arg.getName().data()] = alloca;
   }
-  if(Value *retval = Block->codegen()) {
-    if(funcType->isVoidTy()) {
-      Builder.CreateRetVoid();
-    } else {
-      Builder.CreateRet(retval);
-    }      
+  Block->codegen();
+  if(!CheckAllPathsReturn(Block.get())) {
+    return HandleErrorValue("Not all code paths return a value.");
   }
-  if(verifyFunction(*F)) {
-    return nullptr;
+  if(!verifyFunction(*F)) {
+    return HandleErrorValue("Unable to verify function.");
   }
   Functions[FuncName] = F;
   return F;
@@ -2053,7 +2077,6 @@ Value *ExprStmtASTNode::codegen() {
 }
 
 Value *IfStmtASTNode::codegen() {
-  //TODO: check with TAs
   Value *CondV = Expr->codegen();
   if (!CondV)
     return HandleErrorValue("Error generating Expr code");
@@ -2082,7 +2105,6 @@ Value *IfStmtASTNode::codegen() {
 }
 
 Value *WhileStmtASTNode::codegen() {
-  //TODO: check with TAs
   Value *CondV = Expr->codegen();
   if (!CondV)
     return HandleErrorValue("Error generating Expr code");
@@ -2380,8 +2402,10 @@ int main(int argc, char **argv) {
   TheModule = std::make_unique<Module>("mini-c", TheContext);
 
   // Run the parser now.
-  parser();
+  std::unique_ptr<ProgramASTNode> prog = parser();
+  llvm::outs() << prog->to_string(1) << "\n";
   fprintf(stderr, "Parsing Finished\n");
+  prog->codegen();
 
   //********************* Start printing final IR **************************
   // Print out all of the generated code into a file called output.ll
