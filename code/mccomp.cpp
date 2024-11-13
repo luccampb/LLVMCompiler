@@ -1856,15 +1856,15 @@ static Type *GetTypeOfToken(TOKEN tok) {
   return nullptr;
 }
 
-//A type can be cast up the chain regardless of associated value, but checking needs to happen to go FLOAT -> INT -> BOOL
+//A type can be widened regardless of associated value, but a narrowing conversion should only happen in certain boolean cases
 static Value* AttemptCast(Type *goalType, Value *v) {
-  //Goal is bool:
+  //Goal is bool, we make a comparison between 0 and v:
   if (goalType->isIntegerTy(1)) {
     if (v->getType()->isIntegerTy(32)) {
-      return Builder.CreateICmpNE(v, 0, "tobool");
+      return Builder.CreateICmpNE(v, ConstantInt::get(TheContext, APInt(32, 0, true)), "tobool");
     }
     if (v->getType()->isFloatTy()) {
-      return Builder.CreateFCmpONE(v, 0, "tobool");
+      return Builder.CreateFCmpONE(v, ConstantFP::get(TheContext, APFloat(0.0f)), "tobool");
     }
     return v; //v is already a bool
   }  
@@ -2035,9 +2035,7 @@ Value *FunDeclASTNode::codegen() {
   if(!CheckAllPathsReturn(Block.get())) {
     return HandleErrorValue("Not all code paths return a value.");
   }
-  if(!verifyFunction(*F)) {
-    return HandleErrorValue("Unable to verify function.");
-  }
+  verifyFunction(*F);
   Functions[FuncName] = F;
   return F;
 }
@@ -2140,7 +2138,7 @@ Value *WhileStmtASTNode::codegen() {
 Value *ReturnStmtASTNode::codegen() {
   Function *function = Builder.GetInsertBlock()->getParent();
   Type *returnType = function->getReturnType();
-  if(!Expr) {
+  if(Expr) {
     Value *retVal = Expr->codegen();
     Type *type = HighestType(retVal->getType(), returnType);
     retVal = AttemptCast(type, retVal);

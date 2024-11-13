@@ -17,7 +17,7 @@ func:
   %n5 = load i32, ptr %n1, align 4
   %eq = icmp eq i32 %n5, 4
   %booltmp = uitofp i1 %eq to float
-  %tobool = fcmp one float %booltmp, <null operand!>
+  %tobool = fcmp one float %booltmp, 0.000000e+00
   br i1 %tobool, label %iftrue, label %else
 
 iftrue:                                           ; preds = %func
@@ -35,5 +35,6 @@ else:                                             ; preds = %func
   br label %end
 
 end:                                              ; preds = %else, %iftrue
-  ret void
+  %result12 = load i32, ptr %result, align 4
+  ret i32 %result12
 }
