@@ -548,10 +548,12 @@ public:
 
 class BlockASTNode : public StmtASTNode {
 public:
-  StmtType stmtType = BLOCK;
+  StmtType stmtType;
   std::vector<std::unique_ptr<LocalDeclASTNode>> LocalDecls;
   std::vector<std::unique_ptr<StmtASTNode>> Statements;  
-  BlockASTNode(std::vector<std::unique_ptr<LocalDeclASTNode>> localdecls, std::vector<std::unique_ptr<StmtASTNode>> statements) : LocalDecls(std::move(localdecls)), Statements(std::move(statements)) {}
+  BlockASTNode(std::vector<std::unique_ptr<LocalDeclASTNode>> localdecls, std::vector<std::unique_ptr<StmtASTNode>> statements) : LocalDecls(std::move(localdecls)), Statements(std::move(statements)) {
+    stmtType = BLOCK;
+  }
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Block";
@@ -654,8 +656,10 @@ class ElseStmtASTNode : public StmtASTNode {
 
 public:
   std::unique_ptr<BlockASTNode> Block;
-  StmtType stmtType = ELSESTMT; 
-  ElseStmtASTNode(std::unique_ptr<BlockASTNode> block) : Block(std::move(block)) {}
+  StmtType stmtType; 
+  ElseStmtASTNode(std::unique_ptr<BlockASTNode> block) : Block(std::move(block)) {
+    stmtType = ELSESTMT;
+  }
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Else Statement\n";
@@ -702,8 +706,10 @@ public:
 class ExprStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
 public:
-  StmtType stmtType = EXPR; 
-  ExprStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {}
+  StmtType stmtType; 
+  ExprStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {
+    stmtType = EXPR;
+  }
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Expr Statement";
@@ -723,10 +729,12 @@ class IfStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
 
 public:
-  StmtType stmtType = IFSTMT; 
+  StmtType stmtType; 
   std::unique_ptr<BlockASTNode> Block;
   std::unique_ptr<ElseStmtASTNode> ElseStmt;
-  IfStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<BlockASTNode> block, std::unique_ptr<ElseStmtASTNode> elsestmt) : Expr(std::move(expr)), Block(std::move(block)), ElseStmt(std::move(elsestmt)) {}
+  IfStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<BlockASTNode> block, std::unique_ptr<ElseStmtASTNode> elsestmt) : Expr(std::move(expr)), Block(std::move(block)), ElseStmt(std::move(elsestmt)) {
+    stmtType = IFSTMT;
+  }
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "If Statement\n";
@@ -758,8 +766,10 @@ class WhileStmtASTNode : public StmtASTNode {
   std::unique_ptr<StmtASTNode> Statement;
 
 public:
-  StmtType stmtType = WHILESTMT; 
-  WhileStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<StmtASTNode> statement) : Expr(std::move(expr)), Statement(std::move(statement)) {}
+  StmtType stmtType; 
+  WhileStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<StmtASTNode> statement) : Expr(std::move(expr)), Statement(std::move(statement)) {
+    stmtType = WHILESTMT;
+  }
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "While Statement\n";
@@ -781,8 +791,10 @@ class ReturnStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
 
 public:
-  StmtType stmtType = RETSTMT; 
-  ReturnStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {}
+  StmtType stmtType; 
+  ReturnStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {
+    stmtType = RETSTMT;
+  }
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Return Statement\n";
@@ -1981,6 +1993,7 @@ Value *BlockASTNode::codegen() {
   //Handle Statements vector
   Value *stmtV;
   for(auto &&stmt : Statements){
+    std::cout << stmt->stmtType << std::endl;
     stmtV = stmt->codegen();
     if(!stmtV) {
       return HandleErrorValue("Error generating statement.");
@@ -2058,11 +2071,16 @@ Value *ElseStmtASTNode::codegen() {
 
 Value *IdentRvalASTNode::codegen() {
   //Prioritises named values over globals first
-  Value *V = Globals[Ident];
-  V = NamedValues[Ident];
-  if (!V)
+  Value *temp;
+  if(Globals[Ident]) {
+    temp = Builder.CreateLoad(Globals[Ident]->getType(), Globals[Ident], Ident);
+  }
+  if(NamedValues[Ident]) {
+    temp = Builder.CreateLoad(NamedValues[Ident]->getAllocatedType(), NamedValues[Ident], Ident);
+  }
+  if (!temp)
     HandleErrorValue("Unknown variable name");
-  return V;
+  return temp;
 }
 
 Value *ExprStmtASTNode::codegen() {
