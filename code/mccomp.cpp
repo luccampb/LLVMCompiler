@@ -542,17 +542,17 @@ public:
 
 class StmtASTNode : public ASTnode {
 public:
-  StmtType stmtType; 
+  virtual StmtType stmtType();
   virtual ~StmtASTNode() {}
 };
 
 class BlockASTNode : public StmtASTNode {
 public:
-  StmtType stmtType;
   std::vector<std::unique_ptr<LocalDeclASTNode>> LocalDecls;
   std::vector<std::unique_ptr<StmtASTNode>> Statements;  
-  BlockASTNode(std::vector<std::unique_ptr<LocalDeclASTNode>> localdecls, std::vector<std::unique_ptr<StmtASTNode>> statements) : LocalDecls(std::move(localdecls)), Statements(std::move(statements)) {
-    stmtType = BLOCK;
+  BlockASTNode(std::vector<std::unique_ptr<LocalDeclASTNode>> localdecls, std::vector<std::unique_ptr<StmtASTNode>> statements) : LocalDecls(std::move(localdecls)), Statements(std::move(statements)) {}
+  StmtType stmtType() override {
+    return StmtType::BLOCK;
   }
   Value *codegen() override;
   std::string to_string(int indent) const override {
@@ -656,9 +656,9 @@ class ElseStmtASTNode : public StmtASTNode {
 
 public:
   std::unique_ptr<BlockASTNode> Block;
-  StmtType stmtType; 
-  ElseStmtASTNode(std::unique_ptr<BlockASTNode> block) : Block(std::move(block)) {
-    stmtType = ELSESTMT;
+  ElseStmtASTNode(std::unique_ptr<BlockASTNode> block) : Block(std::move(block)) {}
+  StmtType stmtType() override {
+    return StmtType::ELSESTMT;
   }
   Value *codegen() override;
   std::string to_string(int indent) const override {
@@ -706,9 +706,9 @@ public:
 class ExprStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
 public:
-  StmtType stmtType; 
-  ExprStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {
-    stmtType = EXPR;
+  ExprStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {}
+  StmtType stmtType() override {
+    return StmtType::EXPR;
   }
   Value *codegen() override;
   std::string to_string(int indent) const override {
@@ -729,11 +729,11 @@ class IfStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
 
 public:
-  StmtType stmtType; 
   std::unique_ptr<BlockASTNode> Block;
   std::unique_ptr<ElseStmtASTNode> ElseStmt;
-  IfStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<BlockASTNode> block, std::unique_ptr<ElseStmtASTNode> elsestmt) : Expr(std::move(expr)), Block(std::move(block)), ElseStmt(std::move(elsestmt)) {
-    stmtType = IFSTMT;
+  IfStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<BlockASTNode> block, std::unique_ptr<ElseStmtASTNode> elsestmt) : Expr(std::move(expr)), Block(std::move(block)), ElseStmt(std::move(elsestmt)) {}
+  StmtType stmtType() override {
+    return StmtType::IFSTMT;
   }
   Value *codegen() override;
   std::string to_string(int indent) const override {
@@ -766,9 +766,9 @@ class WhileStmtASTNode : public StmtASTNode {
   std::unique_ptr<StmtASTNode> Statement;
 
 public:
-  StmtType stmtType; 
-  WhileStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<StmtASTNode> statement) : Expr(std::move(expr)), Statement(std::move(statement)) {
-    stmtType = WHILESTMT;
+  WhileStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<StmtASTNode> statement) : Expr(std::move(expr)), Statement(std::move(statement)) {}
+  StmtType stmtType() override {
+    return StmtType::WHILESTMT;
   }
   Value *codegen() override;
   std::string to_string(int indent) const override {
@@ -790,10 +790,10 @@ public:
 class ReturnStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
 
-public:
-  StmtType stmtType; 
-  ReturnStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {
-    stmtType = RETSTMT;
+public: 
+  ReturnStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {}
+  StmtType stmtType() override {
+    return StmtType::RETSTMT;
   }
   Value *codegen() override;
   std::string to_string(int indent) const override {
@@ -1908,16 +1908,16 @@ static Type* HighestType(Type *t1, Type *t2) {
 static bool CheckAllPathsReturn(BlockASTNode* block) {
   //Only care about the block's statements
   for(auto &&stmt : block->Statements) {
-    if(stmt->stmtType==RETSTMT) {
+    if(stmt->stmtType()==RETSTMT) {
       return true;
     }
     //Must be either if/while/block/expr
-    if(stmt->stmtType==BLOCK) {
+    if(stmt->stmtType()==BLOCK) {
       //Can static cast because we know it must be a BlockASTNode
       BlockASTNode* subBlock = static_cast<BlockASTNode*>(stmt.get());
       return CheckAllPathsReturn(subBlock);
     }
-    if(stmt->stmtType==IFSTMT) {
+    if(stmt->stmtType()==IFSTMT) {
       //Can static cast because we know it must be an IfStmtASTNode
       IfStmtASTNode* ifBlock = static_cast<IfStmtASTNode*>(stmt.get());
       if(!ifBlock->ElseStmt) {
@@ -1991,13 +1991,8 @@ Value *BlockASTNode::codegen() {
     decl->codegen();
   }
   //Handle Statements vector
-  Value *stmtV;
   for(auto &&stmt : Statements){
-    std::cout << stmt->stmtType << std::endl;
-    stmtV = stmt->codegen();
-    if(!stmtV) {
-      return HandleErrorValue("Error generating statement.");
-    }
+    stmt->codegen();
   }
   //Now want to remove any new variables from NamedVals;
   for(auto &&kvp : NamedValues) {
@@ -2154,9 +2149,6 @@ Value *ReturnStmtASTNode::codegen() {
     }
     return Builder.CreateRet(retVal);
   } else {
-    if(!returnType->isVoidTy()) {
-      return HandleErrorValue("Function must return a value.");
-    }
     return Builder.CreateRetVoid();
   }
 }
