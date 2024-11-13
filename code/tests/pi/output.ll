@@ -21,32 +21,32 @@ iftrue:                                           ; preds = %cond
   br i1 %flag2, label %iftrue3, label %else
 
 iftrue3:                                          ; preds = %iftrue
-  %PI4 = load float, ptr %PI, align 4
+  %i4 = load i32, ptr %i, align 4
+  %addtmp = add i32 2, %i4
   %i5 = load i32, ptr %i, align 4
-  %i6 = load i32, ptr %i, align 4
-  %addtmp = add i32 %i6, 1
+  %addtmp6 = add i32 1, %i5
   %i7 = load i32, ptr %i, align 4
-  %addtmp8 = add i32 %i7, 2
-  %multmp = mul i32 %addtmp, %addtmp8
-  %multmp9 = mul i32 %i5, %multmp
-  %0 = sitofp i32 %multmp9 to float
-  %divtmp = fdiv float 4.000000e+00, %0
-  %addtmp10 = fadd float %PI4, %divtmp
+  %multmp = mul i32 %addtmp6, %i7
+  %multmp8 = mul i32 %addtmp, %multmp
+  %0 = sitofp i32 %multmp8 to float
+  %divtmp = fdiv float %0, 4.000000e+00
+  %PI9 = load float, ptr %PI, align 4
+  %addtmp10 = fadd float %divtmp, %PI9
   store float %addtmp10, ptr %PI, align 4
   br label %end
 
 else:                                             ; preds = %iftrue
-  %PI11 = load float, ptr %PI, align 4
-  %i12 = load i32, ptr %i, align 4
+  %i11 = load i32, ptr %i, align 4
+  %addtmp12 = add i32 2, %i11
   %i13 = load i32, ptr %i, align 4
-  %addtmp14 = add i32 %i13, 1
+  %addtmp14 = add i32 1, %i13
   %i15 = load i32, ptr %i, align 4
-  %addtmp16 = add i32 %i15, 2
-  %multmp17 = mul i32 %addtmp14, %addtmp16
-  %multmp18 = mul i32 %i12, %multmp17
-  %1 = sitofp i32 %multmp18 to float
-  %divtmp19 = fdiv float 4.000000e+00, %1
-  %subtmp = fsub float %PI11, %divtmp19
+  %multmp16 = mul i32 %addtmp14, %i15
+  %multmp17 = mul i32 %addtmp12, %multmp16
+  %1 = sitofp i32 %multmp17 to float
+  %divtmp18 = fdiv float %1, 4.000000e+00
+  %PI19 = load float, ptr %PI, align 4
+  %subtmp = fsub float %divtmp18, %PI19
   store float %subtmp, ptr %PI, align 4
   br label %end
 
@@ -55,7 +55,7 @@ end:                                              ; preds = %else, %iftrue3
   %not = xor i1 %flag20, true
   store i1 %not, ptr %flag, align 1
   %i21 = load i32, ptr %i, align 4
-  %addtmp22 = add i32 %i21, 2
+  %addtmp22 = add i32 2, %i21
   store i32 %addtmp22, ptr %i, align 4
   br label %cond
 

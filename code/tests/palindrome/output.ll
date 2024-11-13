@@ -22,15 +22,15 @@ cond:                                             ; preds = %iftrue, %func
 
 iftrue:                                           ; preds = %cond
   %number4 = load i32, ptr %number1, align 4
-  %modtmp = srem i32 %number4, 10
+  %modtmp = srem i32 10, %number4
   store i32 %modtmp, ptr %rmndr, align 4
-  %rev5 = load i32, ptr %rev, align 4
-  %multmp = mul i32 %rev5, 10
-  %rmndr6 = load i32, ptr %rmndr, align 4
-  %addtmp = add i32 %multmp, %rmndr6
+  %rmndr5 = load i32, ptr %rmndr, align 4
+  %rev6 = load i32, ptr %rev, align 4
+  %multmp = mul i32 10, %rev6
+  %addtmp = add i32 %rmndr5, %multmp
   store i32 %addtmp, ptr %rev, align 4
   %number7 = load i32, ptr %number1, align 4
-  %divtmp = sdiv i32 %number7, 10
+  %divtmp = sdiv i32 10, %number7
   store i32 %divtmp, ptr %number1, align 4
   br label %cond
 

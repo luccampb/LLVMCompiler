@@ -37,9 +37,9 @@ iftrue6:                                          ; preds = %iftrue
   br label %end
 
 else:                                             ; preds = %iftrue
-  %first8 = load i32, ptr %first, align 4
-  %second9 = load i32, ptr %second, align 4
-  %addtmp = add i32 %first8, %second9
+  %second8 = load i32, ptr %second, align 4
+  %first9 = load i32, ptr %first, align 4
+  %addtmp = add i32 %second8, %first9
   store i32 %addtmp, ptr %next, align 4
   %second10 = load i32, ptr %second, align 4
   store i32 %second10, ptr %first, align 4
@@ -51,11 +51,11 @@ end:                                              ; preds = %else, %iftrue6
   %next12 = load i32, ptr %next, align 4
   %calltmp13 = call i32 @print_int(i32 %next12)
   %c14 = load i32, ptr %c, align 4
-  %addtmp15 = add i32 %c14, 1
+  %addtmp15 = add i32 1, %c14
   store i32 %addtmp15, ptr %c, align 4
-  %total16 = load i32, ptr %total, align 4
-  %next17 = load i32, ptr %next, align 4
-  %addtmp18 = add i32 %total16, %next17
+  %next16 = load i32, ptr %next, align 4
+  %total17 = load i32, ptr %total, align 4
+  %addtmp18 = add i32 %next16, %total17
   store i32 %addtmp18, ptr %total, align 4
   br label %cond
 

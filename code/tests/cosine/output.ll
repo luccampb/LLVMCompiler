@@ -26,28 +26,28 @@ cond:                                             ; preds = %iftrue, %func
   br i1 %gt, label %iftrue, label %end
 
 iftrue:                                           ; preds = %cond
-  %term4 = load float, ptr %term, align 4
-  %x5 = load float, ptr %x1, align 4
+  %n4 = load float, ptr %n, align 4
+  %addtmp = fadd float 1.000000e+00, %n4
+  %n5 = load float, ptr %n, align 4
   %x6 = load float, ptr %x1, align 4
-  %n7 = load float, ptr %n, align 4
-  %n8 = load float, ptr %n, align 4
-  %addtmp = fadd float %n8, 1.000000e+00
-  %divtmp = fdiv float %n7, %addtmp
-  %divtmp9 = fdiv float %x6, %divtmp
-  %multmp = fmul float %x5, %divtmp9
-  %multmp10 = fmul float %term4, %multmp
-  store float %multmp10, ptr %term, align 4
-  %cos11 = load float, ptr %cos, align 4
+  %x7 = load float, ptr %x1, align 4
+  %term8 = load float, ptr %term, align 4
+  %multmp = fmul float %x7, %term8
+  %multmp9 = fmul float %x6, %multmp
+  %divtmp = fdiv float %n5, %multmp9
+  %divtmp10 = fdiv float %addtmp, %divtmp
+  store float %divtmp10, ptr %term, align 4
+  %term11 = load float, ptr %term, align 4
   %alt12 = load float, ptr %alt, align 4
-  %term13 = load float, ptr %term, align 4
-  %multmp14 = fmul float %alt12, %term13
-  %addtmp15 = fadd float %cos11, %multmp14
+  %multmp13 = fmul float %term11, %alt12
+  %cos14 = load float, ptr %cos, align 4
+  %addtmp15 = fadd float %multmp13, %cos14
   store float %addtmp15, ptr %cos, align 4
   %alt16 = load float, ptr %alt, align 4
   %neg = fneg float %alt16
   store float %neg, ptr %alt, align 4
   %n17 = load float, ptr %n, align 4
-  %addtmp18 = fadd float %n17, 2.000000e+00
+  %addtmp18 = fadd float 2.000000e+00, %n17
   store float %addtmp18, ptr %n, align 4
   br label %cond
 

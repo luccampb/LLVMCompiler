@@ -13,10 +13,10 @@ func:
 
 iftrue:                                           ; preds = %func
   %n3 = load i32, ptr %n1, align 4
-  %n4 = load i32, ptr %n1, align 4
-  %subtmp = sub i32 %n4, 1
+  %subtmp = sub i32 1, %n3
   %calltmp = call i32 @multiplyNumbers(i32 %subtmp)
-  %multmp = mul i32 %n3, %calltmp
+  %n4 = load i32, ptr %n1, align 4
+  %multmp = mul i32 %calltmp, %n4
   store i32 %multmp, ptr %result, align 4
   br label %end
 

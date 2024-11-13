@@ -18,7 +18,7 @@ cond:                                             ; preds = %iftrue, %func
 
 iftrue:                                           ; preds = %cond
   %result3 = load i32, ptr %result, align 4
-  %addtmp = add i32 %result3, 1
+  %addtmp = add i32 1, %result3
   store i32 %addtmp, ptr %result, align 4
   %result4 = load i32, ptr %result, align 4
   %calltmp5 = call i32 @print_int(i32 %result4)

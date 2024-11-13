@@ -18,12 +18,12 @@ cond:                                             ; preds = %iftrue, %func
   br i1 %le, label %iftrue, label %end
 
 iftrue:                                           ; preds = %cond
-  %factorial4 = load i32, ptr %factorial, align 4
-  %i5 = load i32, ptr %i, align 4
-  %multmp = mul i32 %factorial4, %i5
+  %i4 = load i32, ptr %i, align 4
+  %factorial5 = load i32, ptr %factorial, align 4
+  %multmp = mul i32 %i4, %factorial5
   store i32 %multmp, ptr %factorial, align 4
   %i6 = load i32, ptr %i, align 4
-  %addtmp = add i32 %i6, 1
+  %addtmp = add i32 1, %i6
   store i32 %addtmp, ptr %i, align 4
   br label %cond
 

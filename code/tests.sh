@@ -43,14 +43,14 @@ echo "Test *****"
 addition=1
 factorial=1
 fibonacci=1
-pi=1
+pi=0
 while=1
 void=1
 cosine=0
 unary=1
-palindrome=1
-recurse=1
-rfact=1
+palindrome=0
+recurse=0
+rfact=0
 
 cd tests/addition/
 

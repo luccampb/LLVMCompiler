@@ -1394,56 +1394,54 @@ std::unique_ptr<RValASTNode> ParseRval() {
 }
 
 std::unique_ptr<TimesASTNode> ParseOperatorTimes() {
-  std::unique_ptr<RValASTNode> left;
-  std::unique_ptr<TimesASTNode> right = nullptr;
+  std::unique_ptr<TimesASTNode> result;
   TOKEN op;
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_times production");
     return nullptr;
   }
-  left = std::move(ParseRval());
+  result = std::make_unique<TimesASTNode>(std::move(ParseRval()), nullptr, op);
   //Check follow set or * / %
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND, EQ, NE, LT, LE, GT, GE, PLUS, MINUS};
-  if(CurTok.type==ASTERIX || CurTok.type==DIV || CurTok.type==MOD) {
+  while(CurTok.type==ASTERIX || CurTok.type==DIV || CurTok.type==MOD) {
     op = CurTok;
     getNextToken(); //Consume * or / or %
-    right = std::move(ParseOperatorTimes());
+    result = std::make_unique<TimesASTNode>(std::move(ParseRval()), std::move(result), op);
   }
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';', 'or', 'and', '==', '!=', '<', '<=', '>', '>=', '+', '-' in operator_times production");
     return nullptr;
   }
-  return std::make_unique<TimesASTNode>(std::move(left), std::move(right), op);
+  return std::move(result);
 }
 
 std::unique_ptr<AddASTNode> ParseOperatorAdd() {
-  std::unique_ptr<TimesASTNode> left;
-  std::unique_ptr<AddASTNode> right = nullptr;
+  std::unique_ptr<AddASTNode> result;
   TOKEN op;
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_add production");
     return nullptr;
   }
-  left = std::move(ParseOperatorTimes());
+  result = std::make_unique<AddASTNode>(std::move(ParseOperatorTimes()), nullptr, op);
   //Check follow set or + or -
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND, EQ, NE, LT, LE, GT, GE};
-  if(CurTok.type==MINUS || CurTok.type==PLUS) {
+  while(CurTok.type==MINUS || CurTok.type==PLUS) {
     op = CurTok;
     getNextToken(); //Consume + or -
-    right = std::move(ParseOperatorAdd());
+    result = std::make_unique<AddASTNode>(std::move(ParseOperatorTimes()), std::move(result), op);
   }
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';', 'or', 'and', '==', '!=', '<', '<=', '>', '>=', in operator_add production");
     return nullptr;
   }
-  return std::make_unique<AddASTNode>(std::move(left), std::move(right), op);
+  return std::move(result);
 }
 
 std::unique_ptr<CompASTNode> ParseOperatorComp() {
   std::unique_ptr<AddASTNode> left;
-  std::unique_ptr<CompASTNode> right = nullptr;
+  std::unique_ptr<CompASTNode> right;
   TOKEN op;
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
