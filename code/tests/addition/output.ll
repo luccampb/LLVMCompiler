@@ -16,9 +16,7 @@ func:
   store i32 %addtmp, ptr %result, align 4
   %n5 = load i32, ptr %n1, align 4
   %eq = icmp eq i32 %n5, 4
-  %booltmp = uitofp i1 %eq to float
-  %tobool = fcmp one float %booltmp, 0.000000e+00
-  br i1 %tobool, label %iftrue, label %else
+  br i1 %eq, label %iftrue, label %else
 
 iftrue:                                           ; preds = %func
   %n6 = load i32, ptr %n1, align 4

@@ -37,13 +37,14 @@ using namespace llvm;
 using namespace llvm::sys;
 
 //TODO: 
-// - Finish Codegen
-// ----- Block
-// ----- Check if and whiles
+// - Lazy operators
+// - Below
+// - Fix Whiles
 // - Test Parsing and Codegen
 // - Error handling
 // - Comments
 // - Report
+// - Add grammar rules above AST nodes and parser funcs
 
 
 //TODO:
@@ -415,7 +416,7 @@ static std::unique_ptr<Module> TheModule;
 //Tables for local variables, global variables and functions
 static std::map<std::string, AllocaInst*> NamedValues; 
 static std::map<std::string, Function *> Functions;
-static std::map<std::string, Value *> Globals;
+static std::map<std::string, GlobalVariable *> Globals;
 
 //===----------------------------------------------------------------------===//
 // AST nodes
@@ -1845,13 +1846,13 @@ static AllocaInst* CreateEntryBlockAlloca(Function *TheFunction, const std::stri
 static Type *GetTypeOfToken(TOKEN tok) {
   switch (tok.type) {
     case BOOL_TOK:
-      return Builder.getInt1Ty();
+      return Type::getInt1Ty(TheContext);
     case INT_TOK:
-      return Builder.getInt32Ty();    
+      return Type::getInt32Ty(TheContext);    
     case FLOAT_TOK:
-      return Builder.getFloatTy();
+      return Type::getFloatTy(TheContext);
     case VOID_TOK:
-      return Builder.getVoidTy();
+      return Type::getVoidTy(TheContext);
   }
   return nullptr;
 }
@@ -2010,31 +2011,37 @@ Value *FunDeclASTNode::codegen() {
     return HandleErrorValue("Function already declared. ");
   } 
   std::vector<Type*> argTypes;
-  if(Params->IsVoid) {
-    argTypes.push_back(Type::getVoidTy(TheContext));
-  }
-  for(auto&& param : Params->ParamList) {
-    argTypes.push_back(GetTypeOfToken(param->VarType));
+  bool isVoid=false;
+  if(Params) {
+    isVoid = Params->IsVoid;
+    for(auto&& param : Params->ParamList) {
+      argTypes.push_back(GetTypeOfToken(param->VarType));
+    }
   }
   Type *funcType = GetTypeOfToken(VarType);
   FunctionType *FT = FunctionType::get(funcType, argTypes, false);
   Function *F = Function::Create(FT, Function::ExternalLinkage, FuncName, TheModule.get());
   unsigned idx = 0;
   for(auto &arg : F->args()) {
-    arg.setName(Params->ParamList[idx++]->Ident);
+    if(!isVoid) {
+      arg.setName(Params->ParamList[idx++]->Ident);
+    }
   }
   BasicBlock *BB = BasicBlock::Create(TheContext, "func", F);
   Builder.SetInsertPoint(BB);
   NamedValues.clear();
-  for(auto &arg : F->args()){
-    AllocaInst *alloca = CreateEntryBlockAlloca(F, arg.getName().data(), arg.getType());
-    Builder.CreateStore(&arg, alloca);
-    NamedValues[arg.getName().data()] = alloca;
-  }
+  if(!isVoid){
+    for(auto &arg : F->args()){
+      AllocaInst *alloca = CreateEntryBlockAlloca(F, arg.getName().data(), arg.getType());
+      Builder.CreateStore(&arg, alloca);
+      NamedValues[arg.getName().data()] = alloca;
+    }
+  }  
   Block->codegen();
   if(!CheckAllPathsReturn(Block.get())) {
     return HandleErrorValue("Not all code paths return a value.");
   }
+  
   verifyFunction(*F);
   Functions[FuncName] = F;
   return F;
@@ -2042,15 +2049,8 @@ Value *FunDeclASTNode::codegen() {
 
 Value *VarDeclASTNode::codegen() {
   //Only happen outside functions because of local_decl
-  //Check there is not an error
-  BasicBlock *currBlock = Builder.GetInsertBlock();
-  Function *parent = currBlock->getParent();
-  if (currBlock && parent) {
-    //Error for me
-    return HandleErrorValue("VARDECL IN FUNCTION??");
-  }
   Type *type = GetTypeOfToken(VarType);
-  if (Globals.count(Ident)==0) {
+  if (Globals.count(Ident)==1) {
     return HandleErrorValue("Global value redeclared.");
   }
   GlobalVariable *g = new GlobalVariable(*TheModule, type, false, GlobalValue::CommonLinkage, Constant::getNullValue(type), Ident);
@@ -2066,7 +2066,7 @@ Value *IdentRvalASTNode::codegen() {
   //Prioritises named values over globals first
   Value *temp;
   if(Globals[Ident]) {
-    temp = Builder.CreateLoad(Globals[Ident]->getType(), Globals[Ident], Ident);
+    temp = Builder.CreateLoad(Globals[Ident]->getValueType(), Globals[Ident], Ident);
   }
   if(NamedValues[Ident]) {
     temp = Builder.CreateLoad(NamedValues[Ident]->getAllocatedType(), NamedValues[Ident], Ident);
@@ -2113,16 +2113,16 @@ Value *IfStmtASTNode::codegen() {
 }
 
 Value *WhileStmtASTNode::codegen() {
-  Value *CondV = Expr->codegen();
-  if (!CondV)
-    return HandleErrorValue("Error generating Expr code");
-  CondV = AttemptCast(Builder.getInt1Ty(), CondV);
   Function *function = Builder.GetInsertBlock()->getParent();
   BasicBlock *condition = BasicBlock::Create(TheContext, "cond", function);
   BasicBlock *true_ = BasicBlock::Create(TheContext, "iftrue", function);
   BasicBlock *end_ = BasicBlock::Create(TheContext, "end");
   Builder.CreateBr(condition);
   Builder.SetInsertPoint(condition);
+  Value *CondV = Expr->codegen();
+  if (!CondV)
+    return HandleErrorValue("Error generating Expr code");
+  CondV = AttemptCast(Builder.getInt1Ty(), CondV);
   Builder.CreateCondBr(CondV, true_, end_);
   Builder.SetInsertPoint(true_);
   Value *TrueV = Statement->codegen();
@@ -2130,7 +2130,6 @@ Value *WhileStmtASTNode::codegen() {
     return HandleErrorValue("Error generating Statement code");
   Builder.CreateBr(condition);
   function->insert(function->end(), end_);
-  Builder.CreateBr(end_);  
   Builder.SetInsertPoint(end_);
   return nullptr;
 }
@@ -2180,13 +2179,12 @@ Value *AssignmentExprASTNode::codegen() {
     }
     return Builder.CreateStore(subExpr, NamedValues[Ident]);
   } else if(Globals[Ident]) {
-    subExpr = AttemptCast(Globals[Ident]->getType(), subExpr);
+    subExpr = AttemptCast(Globals[Ident]->getValueType(), subExpr);
     if(!subExpr) {
       return HandleErrorValue("Attempt to assign global variable with expression of unmatching type.");
     }
     return Builder.CreateStore(subExpr, Globals[Ident]);
   } else {
-    // std::cout << Ident << std::endl;
     return HandleErrorValue("Reference to undeclared variable.");
   }
 }
@@ -2220,14 +2218,14 @@ Value *FunctionCallASTNode::codegen() {
 }
 
 Value *IntASTNode::codegen() {
-  return ConstantInt::get(TheContext, APInt(32, Val, false));
+  return ConstantInt::get(TheContext, APInt(32, Val, true));
 }
 
 Value *BoolASTNode::codegen() {
   if(Val) {
-    return ConstantInt::get(TheContext, APInt(1, 1, false));
+    return ConstantInt::get(TheContext, APInt(1, 1, true));
   }
-  return ConstantInt::get(TheContext, APInt(1, 0, false));
+  return ConstantInt::get(TheContext, APInt(1, 0, true));
 }
 
 Value *FloatASTNode::codegen() {
@@ -2296,29 +2294,29 @@ Value *CompASTNode::codegen() {
   Type *targetType = HighestType(LHS->getType(), RHS->getType());
   LHS = AttemptCast(targetType, LHS);
   RHS = AttemptCast(targetType, RHS);
-  Value *temp;
+  // Value *temp;
   if(targetType->isIntegerTy()) {
     if(Op.lexeme==">") {
-      temp = Builder.CreateICmpSGT(LHS, RHS, "gt");
+      return Builder.CreateICmpSGT(LHS, RHS, "gt");
     } else if(Op.lexeme==">=") {
-      temp = Builder.CreateICmpSGE(LHS, RHS, "ge");
+      return Builder.CreateICmpSGE(LHS, RHS, "ge");
     } else if(Op.lexeme=="<") {
-      temp = Builder.CreateICmpSLT(LHS, RHS, "lt");
+      return Builder.CreateICmpSLT(LHS, RHS, "lt");
     } else {
-      temp = Builder.CreateICmpSLE(LHS, RHS, "le");
+      return Builder.CreateICmpSLE(LHS, RHS, "le");
     }
   } else {
     if(Op.lexeme==">") {
-      temp = Builder.CreateFCmpUGT(LHS, RHS, "gt");
+      return Builder.CreateFCmpUGT(LHS, RHS, "gt");
     } else if(Op.lexeme==">=") {
-      temp = Builder.CreateFCmpUGE(LHS, RHS, "ge");
+      return Builder.CreateFCmpUGE(LHS, RHS, "ge");
     } else if(Op.lexeme=="<") {
-      temp = Builder.CreateFCmpULT(LHS, RHS, "lt");
+      return Builder.CreateFCmpULT(LHS, RHS, "lt");
     } else {
-      temp = Builder.CreateFCmpULE(LHS, RHS, "le");
+      return Builder.CreateFCmpULE(LHS, RHS, "le");
     }
   }
-  return Builder.CreateUIToFP(temp, Type::getFloatTy(TheContext), "booltmp");
+  // return Builder.CreateUIToFP(temp, Type::getFloatTy(TheContext), "booltmp");
 }
 
 Value *EquivASTNode::codegen() {
@@ -2330,21 +2328,21 @@ Value *EquivASTNode::codegen() {
   Type *targetType = HighestType(LHS->getType(), RHS->getType());
   LHS = AttemptCast(targetType, LHS);
   RHS = AttemptCast(targetType, RHS);
-  Value *temp;
+  // Value *temp;
   if(targetType->isIntegerTy()) {
     if(Op.lexeme=="==") {
-      temp = Builder.CreateICmpEQ(LHS, RHS, "eq");
+      return Builder.CreateICmpEQ(LHS, RHS, "eq");
     } else {
-      temp = Builder.CreateICmpNE(LHS, RHS, "ne");
+      return Builder.CreateICmpNE(LHS, RHS, "ne");
     }
   } else {
     if(Op.lexeme=="==") {
-      temp = Builder.CreateFCmpUEQ(LHS, RHS, "eq");
+      return Builder.CreateFCmpUEQ(LHS, RHS, "eq");
     } else {
-      temp = Builder.CreateFCmpUNE(LHS, RHS, "ne");
+      return Builder.CreateFCmpUNE(LHS, RHS, "ne");
     }
   }
-  return Builder.CreateUIToFP(temp, Type::getFloatTy(TheContext), "booltmp");
+  // return Builder.CreateUIToFP(temp, Type::getFloatTy(TheContext), "booltmp");
 }
 
 Value *AndASTNode::codegen() {
