@@ -32,11 +32,11 @@ iftrue:                                           ; preds = %cond
   %n7 = load float, ptr %n, align 4
   %n8 = load float, ptr %n, align 4
   %addtmp = fadd float %n8, 1.000000e+00
-  %divtmp = fdiv float %n7, %addtmp
-  %divtmp9 = fdiv float %x6, %divtmp
-  %multmp = fmul float %x5, %divtmp9
-  %multmp10 = fmul float %term4, %multmp
-  store float %multmp10, ptr %term, align 4
+  %multmp = fmul float %term4, %x5
+  %multmp9 = fmul float %multmp, %x6
+  %divtmp = fdiv float %multmp9, %n7
+  %divtmp10 = fdiv float %divtmp, %addtmp
+  store float %divtmp10, ptr %term, align 4
   %cos11 = load float, ptr %cos, align 4
   %alt12 = load float, ptr %alt, align 4
   %term13 = load float, ptr %term, align 4
