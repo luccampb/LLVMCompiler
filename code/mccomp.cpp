@@ -37,9 +37,8 @@ using namespace llvm;
 using namespace llvm::sys;
 
 //TODO: 
-// - Lazy operators
+// - Boolean short circuit
 // - Test Parsing and Codegen
-// - Error handling
 // - Comments
 // - Report
 // - Add grammar rules above AST nodes and parser funcs
@@ -1971,10 +1970,10 @@ Value *ExternASTNode::codegen() {
 Value *LocalDeclASTNode::codegen() {
   BasicBlock *currBlock = Builder.GetInsertBlock();
   Function *function = currBlock->getParent();
+  Type *type = GetTypeOfToken(VarType);
   if(NamedValues[Ident]) {
     return HandleErrorValue("Local variable declared multiple times.");
-  }
-  Type *type = GetTypeOfToken(VarType);
+  }  
   AllocaInst *alloca = CreateEntryBlockAlloca(function, Ident, type);
   NamedValues[Ident] = alloca;
   return alloca;
@@ -1982,7 +1981,11 @@ Value *LocalDeclASTNode::codegen() {
 
 Value *BlockASTNode::codegen() {
   std::map<std::string, AllocaInst*> OldNamedVals;
+  std::map<std::string, bool> OldNVInit;
   OldNamedVals.insert(NamedValues.begin(), NamedValues.end());
+  if(OldNamedVals["locx"]) {
+    std::cout<<"locx in onv"<<std::endl;
+  }
   //Handle local decls vector
   for(auto &&decl : LocalDecls){
     decl->codegen();
@@ -1993,12 +1996,16 @@ Value *BlockASTNode::codegen() {
   }
   //Now want to remove any new variables from NamedVals;
   for(auto &&kvp : NamedValues) {
-    if(OldNamedVals.count(kvp.first)==1) {
+    if(OldNamedVals.count(kvp.first)!=0) {
+      std::cout<<kvp.first<<std::endl;
       OldNamedVals[kvp.first] = NamedValues[kvp.first];
     }
   }
   NamedValues.clear();
   NamedValues.insert(OldNamedVals.begin(), OldNamedVals.end());
+  // if(NamedValues["locx"]) {
+  //   std::cout<<"locx in nv"<<std::endl;
+  // }
   return Constant::getNullValue(Builder.getInt1Ty());
 }
 
@@ -2206,7 +2213,10 @@ Value *ArgListASTNode::codegen() {
 
 Value *FunctionCallASTNode::codegen() {
   Function* calleeFunc = TheModule->getFunction(FuncName);
-  std::vector<std::unique_ptr<ExprASTNode>> args = std::move(Args->Exprs);
+  std::vector<std::unique_ptr<ExprASTNode>> args;
+  if(Args) {
+    args = std::move(Args->Exprs);
+  }
   if (!calleeFunc) {
     return HandleErrorValue("Reference to undeclared function.");
   }
@@ -2398,11 +2408,33 @@ Value *AndASTNode::codegen() {
     return LHS;
   }
   Value *RHS = Right->codegen();
-  //Ands should only be done on booleans. 
+  //Ors should only be done on booleans. 
   //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
   LHS = AttemptCast(Builder.getInt1Ty(), LHS);
   RHS = AttemptCast(Builder.getInt1Ty(), RHS);
   return Builder.CreateBinOp(Instruction::And, LHS, RHS, "and");
+  // Value *LHS = Left->codegen();
+  // if(!Right) {
+  //   return LHS;
+  // }
+  // Value *temp;
+  // //Ands should only be done on booleans. 
+  // //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
+  // LHS = AttemptCast(Builder.getInt1Ty(), LHS);
+  // // Create blocks for short-circuit evaluation
+  // Function *function = Builder.GetInsertBlock()->getParent();
+  // BasicBlock *rhs_ = BasicBlock::Create(TheContext, "rhs", function);
+  // BasicBlock *end_ = BasicBlock::Create(TheContext, "end", function);
+  // temp = LHS;
+  // // If LHS is true, skip to rhs_; otherwise, go to end_
+  // Builder.CreateCondBr(LHS, rhs_, end_);
+  // Builder.SetInsertPoint(rhs_);
+  // Value *RHS = Right->codegen();
+  // RHS = AttemptCast(Builder.getInt1Ty(), RHS);
+  // temp = Builder.CreateBinOp(Instruction::And, LHS, RHS, "and");
+  // Builder.CreateBr(end_);
+  // Builder.SetInsertPoint(end_);
+  // return temp;
 }
 
 Value *OrASTNode::codegen() {  
@@ -2416,6 +2448,28 @@ Value *OrASTNode::codegen() {
   LHS = AttemptCast(Builder.getInt1Ty(), LHS);
   RHS = AttemptCast(Builder.getInt1Ty(), RHS);
   return Builder.CreateBinOp(Instruction::Or, LHS, RHS, "or");
+  // Value *LHS = Left->codegen();
+  // if(!Right) {
+  //   return LHS;
+  // }
+  // Value *temp;
+  // //Ors should only be done on booleans. 
+  // //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
+  // LHS = AttemptCast(Builder.getInt1Ty(), LHS);
+  // // Create blocks for short-circuit evaluation
+  // Function *function = Builder.GetInsertBlock()->getParent();
+  // BasicBlock *rhs_ = BasicBlock::Create(TheContext, "rhs", function);
+  // BasicBlock *end_ = BasicBlock::Create(TheContext, "end", function);
+  // temp = LHS;
+  // // If LHS is true, skip to end_; otherwise, go to rhs_
+  // Builder.CreateCondBr(LHS, end_, rhs_);
+  // Builder.SetInsertPoint(rhs_);
+  // Value *RHS = Right->codegen();
+  // RHS = AttemptCast(Builder.getInt1Ty(), RHS);
+  // temp = Builder.CreateBinOp(Instruction::Or, LHS, RHS, "or");
+  // Builder.CreateBr(end_);
+  // Builder.SetInsertPoint(end_);
+  // return temp;
 }
 
 Value *OrExprASTNode::codegen() {
