@@ -1866,7 +1866,7 @@ static Value* AttemptCast(Type *goalType, Value *v) {
     if (v->getType()->isIntegerTy(1)) {
       return Builder.CreateZExt(v, Builder.getInt32Ty());
     } else if (v->getType()->isFloatTy()) {
-      return Builder.CreateFPToSI(v, Builder.getInt32Ty());
+      return HandleErrorValue("Narrowing conversion not allowed: converting float to int.");
     } else if (v->getType()->isIntegerTy(32)) {
       return v;
     } else {
@@ -2066,7 +2066,7 @@ Value *ElseStmtASTNode::codegen() {
 
 Value *IdentRvalASTNode::codegen() {
   //Prioritises named values over globals first
-  Value *temp;
+  Value *temp = nullptr;
   if(Globals[Ident]) {
     temp = Builder.CreateLoad(Globals[Ident]->getValueType(), Globals[Ident], Ident);
   }
@@ -2074,7 +2074,7 @@ Value *IdentRvalASTNode::codegen() {
     temp = Builder.CreateLoad(NamedValues[Ident]->getAllocatedType(), NamedValues[Ident], Ident);
   }
   if (!temp)
-    HandleErrorValue("Reference to undefined variable name.");
+    return HandleErrorValue("Reference to undefined variable name.");
   return temp;
 }
 
@@ -2144,10 +2144,16 @@ Value *ReturnStmtASTNode::codegen() {
     Type *type = HighestType(retVal->getType(), returnType);
     retVal = AttemptCast(type, retVal);
     if(!retVal || type != returnType) {
-      return HandleErrorValue("Function returns value of invalid type.");
+      if(returnType->isVoidTy()) {
+        return HandleErrorValue("Void function returns value.");
+      }
+      return HandleErrorValue("Function return value has higher type than defined return type.");
     }
     return Builder.CreateRet(retVal);
   } else {
+    if(!returnType->isVoidTy()) {
+      return HandleErrorValue("Non-void function is returning void.");
+    }
     return Builder.CreateRetVoid();
   }
 }
@@ -2467,9 +2473,9 @@ int main(int argc, char **argv) {
 
   // Run the parser now.
   std::unique_ptr<ProgramASTNode> prog = parser();
-  llvm::outs() << prog->to_string(1) << "\n";
+  // llvm::outs() << prog->to_string(1) << "\n";
   fprintf(stderr, "Parsing Finished\n");
-  // prog->codegen();
+  prog->codegen();
 
   //********************* Start printing final IR **************************
   // Print out all of the generated code into a file called output.ll
