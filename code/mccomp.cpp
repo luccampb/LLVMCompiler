@@ -37,7 +37,6 @@ using namespace llvm;
 using namespace llvm::sys;
 
 //TODO: 
-// - Boolean short circuit
 // - Test Parsing and Codegen
 // - Comments
 // - Report
@@ -1983,9 +1982,6 @@ Value *BlockASTNode::codegen() {
   std::map<std::string, AllocaInst*> OldNamedVals;
   std::map<std::string, bool> OldNVInit;
   OldNamedVals.insert(NamedValues.begin(), NamedValues.end());
-  if(OldNamedVals["locx"]) {
-    std::cout<<"locx in onv"<<std::endl;
-  }
   //Handle local decls vector
   for(auto &&decl : LocalDecls){
     decl->codegen();
@@ -1997,15 +1993,11 @@ Value *BlockASTNode::codegen() {
   //Now want to remove any new variables from NamedVals;
   for(auto &&kvp : NamedValues) {
     if(OldNamedVals.count(kvp.first)!=0) {
-      std::cout<<kvp.first<<std::endl;
       OldNamedVals[kvp.first] = NamedValues[kvp.first];
     }
   }
   NamedValues.clear();
   NamedValues.insert(OldNamedVals.begin(), OldNamedVals.end());
-  // if(NamedValues["locx"]) {
-  //   std::cout<<"locx in nv"<<std::endl;
-  // }
   return Constant::getNullValue(Builder.getInt1Ty());
 }
 
@@ -2399,7 +2391,6 @@ Value *EquivASTNode::codegen() {
       return Builder.CreateFCmpUNE(LHS, RHS, "ne");
     }
   }
-  // return Builder.CreateUIToFP(temp, Type::getFloatTy(TheContext), "booltmp");
 }
 
 Value *AndASTNode::codegen() {
@@ -2407,34 +2398,19 @@ Value *AndASTNode::codegen() {
   if(!Right) {
     return LHS;
   }
+  Function* function = Builder.GetInsertBlock()->getParent();
+  // Create blocks for evaluating RHS, true block, and result
+  BasicBlock *rhs_ = BasicBlock::Create(Builder.getContext(), "rhs_", function);
+  BasicBlock *end_ = BasicBlock::Create(Builder.getContext(), "end_", function);
+  Builder.CreateCondBr(LHS, rhs_, end_);
+  Builder.SetInsertPoint(rhs_);
   Value *RHS = Right->codegen();
-  //Ors should only be done on booleans. 
-  //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
-  LHS = AttemptCast(Builder.getInt1Ty(), LHS);
-  RHS = AttemptCast(Builder.getInt1Ty(), RHS);
-  return Builder.CreateBinOp(Instruction::And, LHS, RHS, "and");
-  // Value *LHS = Left->codegen();
-  // if(!Right) {
-  //   return LHS;
-  // }
-  // Value *temp;
-  // //Ands should only be done on booleans. 
-  // //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
-  // LHS = AttemptCast(Builder.getInt1Ty(), LHS);
-  // // Create blocks for short-circuit evaluation
-  // Function *function = Builder.GetInsertBlock()->getParent();
-  // BasicBlock *rhs_ = BasicBlock::Create(TheContext, "rhs", function);
-  // BasicBlock *end_ = BasicBlock::Create(TheContext, "end", function);
-  // temp = LHS;
-  // // If LHS is true, skip to rhs_; otherwise, go to end_
-  // Builder.CreateCondBr(LHS, rhs_, end_);
-  // Builder.SetInsertPoint(rhs_);
-  // Value *RHS = Right->codegen();
-  // RHS = AttemptCast(Builder.getInt1Ty(), RHS);
-  // temp = Builder.CreateBinOp(Instruction::And, LHS, RHS, "and");
-  // Builder.CreateBr(end_);
-  // Builder.SetInsertPoint(end_);
-  // return temp;
+  Builder.CreateBr(end_);
+  Builder.SetInsertPoint(end_);
+  PHINode *Result = Builder.CreatePHI(Builder.getInt1Ty(), 2, "ortmp");
+  Result->addIncoming(ConstantInt::get(Type::getInt1Ty(TheContext), APInt(1, 0, true)), end_);
+  Result->addIncoming(RHS, rhs_);
+  return Result;
 }
 
 Value *OrASTNode::codegen() {  
@@ -2442,34 +2418,19 @@ Value *OrASTNode::codegen() {
   if(!Right) {
     return LHS;
   }
+  Function* function = Builder.GetInsertBlock()->getParent();
+  // Create blocks for evaluating RHS, true block, and result
+  BasicBlock *rhs_ = BasicBlock::Create(Builder.getContext(), "rhs_", function);
+  BasicBlock *end_ = BasicBlock::Create(Builder.getContext(), "end_", function);
+  Builder.CreateCondBr(LHS, end_, rhs_);
+  Builder.SetInsertPoint(rhs_);
   Value *RHS = Right->codegen();
-  //Ors should only be done on booleans. 
-  //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
-  LHS = AttemptCast(Builder.getInt1Ty(), LHS);
-  RHS = AttemptCast(Builder.getInt1Ty(), RHS);
-  return Builder.CreateBinOp(Instruction::Or, LHS, RHS, "or");
-  // Value *LHS = Left->codegen();
-  // if(!Right) {
-  //   return LHS;
-  // }
-  // Value *temp;
-  // //Ors should only be done on booleans. 
-  // //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
-  // LHS = AttemptCast(Builder.getInt1Ty(), LHS);
-  // // Create blocks for short-circuit evaluation
-  // Function *function = Builder.GetInsertBlock()->getParent();
-  // BasicBlock *rhs_ = BasicBlock::Create(TheContext, "rhs", function);
-  // BasicBlock *end_ = BasicBlock::Create(TheContext, "end", function);
-  // temp = LHS;
-  // // If LHS is true, skip to end_; otherwise, go to rhs_
-  // Builder.CreateCondBr(LHS, end_, rhs_);
-  // Builder.SetInsertPoint(rhs_);
-  // Value *RHS = Right->codegen();
-  // RHS = AttemptCast(Builder.getInt1Ty(), RHS);
-  // temp = Builder.CreateBinOp(Instruction::Or, LHS, RHS, "or");
-  // Builder.CreateBr(end_);
-  // Builder.SetInsertPoint(end_);
-  // return temp;
+  Builder.CreateBr(end_);
+  Builder.SetInsertPoint(end_);
+  PHINode *Result = Builder.CreatePHI(Builder.getInt1Ty(), 2, "ortmp");
+  Result->addIncoming(ConstantInt::get(Type::getInt1Ty(TheContext), APInt(1, 1, true)), end_);
+  Result->addIncoming(RHS, rhs_);
+  return Result;
 }
 
 Value *OrExprASTNode::codegen() {

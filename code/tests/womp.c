@@ -1,5 +1,9 @@
 int test() {
-    if(1==1 || 1!=2) {
+    int x;
+    int y;
+    x = 3;
+    y = 4;
+    if(1!=1 && x==y) {
         return 1;
     }
     return 2;
