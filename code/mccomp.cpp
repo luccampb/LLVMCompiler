@@ -2153,8 +2153,9 @@ Value *LocalDeclASTNode::codegen() {
 
 Value *BlockASTNode::codegen() {
   std::map<std::string, AllocaInst*> OldNamedVals;
-  std::map<std::string, bool> OldNVInit;
+  std::vector<std::string> OldLocalD;
   OldNamedVals.insert(NamedValues.begin(), NamedValues.end());
+  OldLocalD = localD;
   //Handle local decls vector
   for(auto &&decl : LocalDecls){
     decl->codegen();
@@ -2170,6 +2171,7 @@ Value *BlockASTNode::codegen() {
     }
   }
   localD.clear();
+  localD = OldLocalD;
   NamedValues.clear();
   NamedValues.insert(OldNamedVals.begin(), OldNamedVals.end());
   return Constant::getNullValue(Builder.getInt1Ty());
