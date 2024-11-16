@@ -1270,6 +1270,8 @@ public:
 //===----------------------------------------------------------------------===//
 
 /* Add function calls for each production */
+
+// Prints a parsing error and stops parsing
 static void HandleError(const char *str) {
   std::string msg = "Error on line: " + std::to_string(CurTok.lineNo) + " with token: " + CurTok.lexeme + ": " + str; 
   fprintf(stderr, "%s\n", msg.c_str());
@@ -1283,38 +1285,42 @@ static void HandleError(const char *str) {
 // param ::= var_type IDENT
 // Combines params, param_list and param into one production
 std::unique_ptr<ParamsASTNode> ParseParams() {
-  //Params consist of vector of paramast
-  //Parse void case first
+  // Define our param list
   std::vector<std::unique_ptr<ParamASTNode>> paramList;
+  // Deal with void case first
   if (CurTok.type == VOID_TOK) {
-    getNextToken(); //Consume void
-    getNextToken(); //Consume RPAR
-    paramList = std::vector<std::unique_ptr<ParamASTNode>>();
+    getNextToken(); // Consume void
+    getNextToken(); // Consume RPAR
+    // Create Params with IsVoid = true with an empty list
     return std::make_unique<ParamsASTNode>(std::move(paramList), true);
   }  
+  // Tracks if param list has any params in it
   bool isEpsilon = true;
-  //Parse param_list
+  // Parse param_list. If the next token is one of the below then we know its a param
   while (CurTok.type == INT_TOK || CurTok.type == FLOAT_TOK || CurTok.type == BOOL_TOK) {
+    // Param list won't be empty so set epsilon tracker to false
     isEpsilon = false;
     TOKEN varType = CurTok;
-    getNextToken(); //Consume type
+    getNextToken(); // Consume type
     if (CurTok.type != IDENT) {
       HandleError("Expected token IDENT in param production");
       return nullptr;
     }
     std::string ident = CurTok.lexeme;
-    paramList.push_back(std::make_unique<ParamASTNode>(varType, ident)); //Add param to paramList vector
-    getNextToken(); //Consume ident
-    //Next part would either be another param denoted by a comma, or from follow set it would be a bracket.
+    // Add param to paramList vector
+    paramList.push_back(std::make_unique<ParamASTNode>(varType, ident));
+    getNextToken(); // Consume ident
+    // Next part would either be another param denoted by a comma, or from follow set it would be a bracket.
     if (CurTok.type != COMMA && CurTok.type != RPAR) {
       HandleError("Expected either ',' or ')' in param production");
       return nullptr;
     }
-    getNextToken(); //Consume RPAR or COMMA
+    getNextToken(); // Consume RPAR or COMMA
   }
-  //Parse epsilon
+  //Parse epsilon case
   if (isEpsilon) {
-    getNextToken(); //Consume RPAR
+    getNextToken(); // Consume RPAR
+    // If it is the epsilon case then we just return a nullptr to the function declaration
     return nullptr;
   }
   return std::make_unique<ParamsASTNode>(std::move(paramList), false);  
@@ -1323,32 +1329,33 @@ std::unique_ptr<ParamsASTNode> ParseParams() {
 // local_decl ::= var_type IDENT ";"
 std::unique_ptr<LocalDeclASTNode> ParseLocalDecl() {
   TOKEN varType = CurTok;
-  getNextToken(); //Consume var_type
+  getNextToken(); // Consume var_type
   if(CurTok.type!=IDENT) {
     HandleError("Expected token IDENT in local_decl production");
     return nullptr;
   }
   std::string ident = CurTok.lexeme;
-  getNextToken();
+  getNextToken(); // Consume ident
   if(CurTok.type!=SC) {
     HandleError("Expected token ';' in local_decl production");
     return nullptr;
   }
-  getNextToken(); //Consume Semicolon
+  getNextToken(); // Consume semicolon
   return std::make_unique<LocalDeclASTNode>(varType, ident);
 }
 
 // local_decls ::= local_decl local_decls
 // 	             | epsilon
 std::vector<std::unique_ptr<LocalDeclASTNode>> ParseLocalDecls() {
-  //local decl or epsilon
-  //for epsilon case check follow set so we dont error
-  //follow local_decls is "!" "(" "-" ";" "if" "return" "while" "{" "}" BOOL_LIT FLOAT_LIT IDENT INT_LIT
+  // Create localDecls list
   std::vector<std::unique_ptr<LocalDeclASTNode>> localDecls;
+  // If CurTok is one of the below then we have another localDecl to add to the list
   while (CurTok.type == BOOL_TOK || CurTok.type == FLOAT_TOK || CurTok.type == INT_TOK) {
     localDecls.push_back(std::move(ParseLocalDecl()));
   }
+  // Follow set of local_decl
   std::vector<TOKEN_TYPE> followSet = {NOT, LPAR, MINUS, SC, IF, RETURN, WHILE, LBRA, RBRA, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
+  // Check follow set as we have an epsilon in the production
   auto search = std::find(followSet.begin(), followSet.end(), CurTok.type);
   if(search==followSet.end()) {
     HandleError("Expected either: '!', '(', '-', ';', 'if', 'return', 'while', '{', '}', BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT after local_decls production");
@@ -1357,6 +1364,9 @@ std::vector<std::unique_ptr<LocalDeclASTNode>> ParseLocalDecls() {
   return std::move(localDecls);
 }
 
+// Declaring ParseExpr() here due to cycle in grammar
+// expr ::= IDENT "=" expr
+//        | operator_or
 std::unique_ptr<ExprASTNode> ParseExpr();
 
 // args ::= arg_list 
@@ -1365,18 +1375,17 @@ std::unique_ptr<ExprASTNode> ParseExpr();
 // 	          |   expr
 //Combines both productions into one by checking the epsilon case then going into the arg_list production
 std::unique_ptr<ArgListASTNode> ParseArgs() {
+  // Declare list of exprs
   std::vector<std::unique_ptr<ExprASTNode>> exprs;
-  //Args production contains epsilon so need to check follow set as well as first (which is ")")
+  // Left parenthesis has already been consumed in ParseRval()
+  // If the current token is ")" then we have a function call with no arguments so return nullptr
   if(CurTok.type==RPAR) {
     return nullptr;
   }
-  bool isExpr = true;
-  while(isExpr) {
+  // If the current token is a comma then we have another expr to parse
+  do {
     exprs.push_back(std::move(ParseExpr()));
-    if(CurTok.type!=COMMA){
-      isExpr = false;
-    }
-  }
+  } while(CurTok.type==COMMA);
   return std::make_unique<ArgListASTNode>(std::move(exprs));
 }
 
@@ -1385,49 +1394,56 @@ std::unique_ptr<ArgListASTNode> ParseArgs() {
 //        | IDENT | IDENT "(" args ")"
 //        | INT_LIT | FLOAT_LIT | BOOL_LIT
 std::unique_ptr<RValASTNode> ParseRval() {
+  // Check the first set to handle errors in one go
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in rval production");
     return nullptr;
   }
+  // Deal with the unary rvals
   if(CurTok.type==NOT || CurTok.type==MINUS) {
     TOKEN op = CurTok;
-    getNextToken();
+    getNextToken(); // Consume unary operator
     return std::make_unique<UnaryOpRValASTNode>(op, std::move(ParseRval()));
+  // Deal with bracketed expressions
   } else if(CurTok.type==LPAR) {
-    getNextToken(); //Consume (
+    getNextToken(); //Consume "("
     std::unique_ptr<ExprASTNode> expr = std::move(ParseExpr());
     if(CurTok.type!=RPAR) {
       HandleError("Expected ')' after 'expr' in rval production");
       return nullptr;
     }
-    getNextToken(); //Consume )
+    getNextToken(); //Consume ")"
     return std::move(expr);
+  // Deal with either a variable use or function declaration
   } else if(CurTok.type==IDENT) {
     std::string ident = CurTok.lexeme;
     getNextToken(); //Consume IDENT
     // "(" isnt in the follow set of rval so we can use this to check which IDENT it is
     if(CurTok.type==LPAR) {
-      getNextToken(); //Consume (
+      getNextToken(); //Consume "("
       std::unique_ptr<ArgListASTNode> args = std::move(ParseArgs());
       if (CurTok.type!=RPAR) {
         HandleError("Expected ')' after 'args' in rval production");
         return nullptr;
       }
-      getNextToken(); //Consume )
+      getNextToken(); //Consume ")"
       return std::make_unique<FunctionCallASTNode>(ident, std::move(args));
     }
     return std::make_unique<IdentRvalASTNode>(ident);
+  // Deal with an integer rval
   } else if(CurTok.type==INT_LIT) {
     TOKEN tok = CurTok;
     int val = std::stoi(CurTok.lexeme);
     getNextToken(); //Consume int literal
     return std::make_unique<IntASTNode>(val);
+  // Deal with a float rval
   } else if(CurTok.type==FLOAT_LIT) {
     TOKEN tok = CurTok;
     float val = std::stof(CurTok.lexeme);
     getNextToken(); //Consume float literal
     return std::make_unique<FloatASTNode>(val);
+  // Deal with a boolean rval
   } else {
     TOKEN tok = CurTok;
     bool val;
@@ -1446,22 +1462,25 @@ std::unique_ptr<RValASTNode> ParseRval() {
 //                  | rval "%" operator_times
 //                  | rval
 std::unique_ptr<TimesASTNode> ParseOperatorTimes() {
+  // Declare our left and right sides of the tree
   std::unique_ptr<RValASTNode> left;
   std::unique_ptr<TimesASTNode> right = nullptr;
   TOKEN op;
+  // Check the first set to ensure no error
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_times production");
     return nullptr;
   }
   left = std::move(ParseRval());
-  //Check follow set or * / %
+  // If next token is a * or / or % then we have a right branch of the tree
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND, EQ, NE, LT, LE, GT, GE, PLUS, MINUS};
   if(CurTok.type==ASTERIX || CurTok.type==DIV || CurTok.type==MOD) {
     op = CurTok;
     getNextToken(); //Consume * or / or %
     right = std::move(ParseOperatorTimes());
   }
+  // Check follow set for an error
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';', 'or', 'and', '==', '!=', '<', '<=', '>', '>=', '+', '-' in operator_times production");
     return nullptr;
@@ -1473,22 +1492,25 @@ std::unique_ptr<TimesASTNode> ParseOperatorTimes() {
 //                | operator_times "-" operator_add
 //                | operator_times
 std::unique_ptr<AddASTNode> ParseOperatorAdd() {
+  // Declare our left and right sides of the tree
   std::unique_ptr<TimesASTNode> left;
   std::unique_ptr<AddASTNode> right = nullptr;
   TOKEN op;
+  // Check the first set to ensure no error
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_add production");
     return nullptr;
   }
   left = std::move(ParseOperatorTimes());
-  //Check follow set or + or -
+  // If next token is a + or - then we have a right branch of the tree
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND, EQ, NE, LT, LE, GT, GE};
   if(CurTok.type==MINUS || CurTok.type==PLUS) {
     op = CurTok;
     getNextToken(); //Consume + or -
     right = std::move(ParseOperatorAdd());
   }
+  // Check follow set for an error
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';', 'or', 'and', '==', '!=', '<', '<=', '>', '>=', in operator_add production");
     return nullptr;
@@ -1502,22 +1524,25 @@ std::unique_ptr<AddASTNode> ParseOperatorAdd() {
 //                  | operator_add ">=" operator_comp
 //                  | operator_add
 std::unique_ptr<CompASTNode> ParseOperatorComp() {
+  // Declare our left and right sides of the tree
   std::unique_ptr<AddASTNode> left;
   std::unique_ptr<CompASTNode> right = nullptr;
   TOKEN op;
+  // Check the first set to ensure no error
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_comp production");
     return nullptr;
   }
   left = std::move(ParseOperatorAdd());
-  //Check follow set or < or <= or > or >=
+  // If next token is a < or <= or > or >= then we have a right branch of the tree
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND, EQ, NE};
   if(CurTok.type==LT || CurTok.type==LE || CurTok.type==GT || CurTok.type==GE) {
     op = CurTok;
     getNextToken(); //Consume < or <= or > or >=
     right = std::move(ParseOperatorComp());
   }
+  // Check follow set for an error
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';', 'or', 'and', '==', '!=' in operator_comp production");
     return nullptr;
@@ -1529,22 +1554,25 @@ std::unique_ptr<CompASTNode> ParseOperatorComp() {
 //                  | operator_comp "!=" operator_equiv
 //                  | operator_comp
 std::unique_ptr<EquivASTNode> ParseOperatorEquiv() {
+  // Declare our left and right sides of the tree
   std::unique_ptr<CompASTNode> left;
   std::unique_ptr<EquivASTNode> right = nullptr;
   TOKEN op;
+  // Check the first set to ensure no error
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_equiv production");
     return nullptr;
   }
   left = std::move(ParseOperatorComp());
-  //Check follow set or == or !=
+  // If next token is a == or != then we have a right branch of the tree
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR, AND};
   if(CurTok.type==EQ || CurTok.type==NE) {
     op = CurTok;
     getNextToken(); //Consume == or !=
     right = std::move(ParseOperatorEquiv());
   }
+  // Check follow set for an error
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';', 'or', 'and' after operator_equiv production");
     return nullptr;
@@ -1555,20 +1583,23 @@ std::unique_ptr<EquivASTNode> ParseOperatorEquiv() {
 // operator_and ::= operator_equiv "&&" operator_and
 //               | operator_equiv
 std::unique_ptr<AndASTNode> ParseOperatorAnd() {
+  // Declare our left and right sides of the tree
   std::unique_ptr<EquivASTNode> left;
   std::unique_ptr<AndASTNode> right;
+  // Check the first set to ensure no error
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_and production");
     return nullptr;
   }
   left = std::move(ParseOperatorEquiv());
-  //Check follow set or &&
+  // If next token is a && then we have a right branch of the tree
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC, OR};
   if(CurTok.type==AND) {
     getNextToken(); //Consume &&
     right = std::move(ParseOperatorAnd());
   }
+  // Check follow set for an error
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';', 'or' in operator_and production");
     return nullptr;
@@ -1579,20 +1610,23 @@ std::unique_ptr<AndASTNode> ParseOperatorAnd() {
 // operator_or ::= operator_and "||" operator_or
 //               | operator_and
 std::unique_ptr<OrASTNode> ParseOperatorOr() {
+  // Declare our left and right sides of the tree
   std::unique_ptr<AndASTNode> left;
   std::unique_ptr<OrASTNode> right = nullptr;
+  // Check the first set to ensure no error
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in operator_or production");
     return nullptr;
   }
   left = std::move(ParseOperatorAnd());
-  //Check follow set or ||
+  // If next token is a || then we have a right branch of the tree
   std::vector<TOKEN_TYPE> followSet = {RPAR, COMMA, SC};
   if(CurTok.type==OR) {
     getNextToken(); //Consume ||
     right = std::move(ParseOperatorOr());
   }
+  // Check follow set for an error
   if (std::find(followSet.begin(), followSet.end(), CurTok.type) == followSet.end()) {
     HandleError("Expected either: ')', ',', ';' in operator_or production");
     return nullptr;
@@ -1603,41 +1637,43 @@ std::unique_ptr<OrASTNode> ParseOperatorOr() {
 // expr ::= IDENT "=" expr
 //        | operator_or
 std::unique_ptr<ExprASTNode> ParseExpr() {
-  //Check that the next token will match an expr
+  // Check next token is in first set
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
     HandleError("Expected either: '!', '(', '-', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in expr production");
     return nullptr;
   }
-  //must be an operator_or
+  // If the token is not an ident the expr must be an operator_or
   if(CurTok.type!=IDENT) {
     return std::make_unique<OrExprASTNode>(std::move(ParseOperatorOr()));
-  } else {
-    //Need to do more investigation to see if it is operator_or or not
-    //IDENT in first part of expr is followed by an "=". This can never happen if the
-    //IDENT is from rval. To do this we need to lookahead one token
+  // Otherwise we need to do more investigation to see if it is operator_or or not
+  } else {    
     TOKEN ident = CurTok;
     TOKEN secondTok = getNextToken();
-    if(CurTok.type==ASSIGN) {
-      //expr ::= IDENT "=" expr
-      putBackToken(secondTok);
+    CurTok = ident;
+    // Put the lookahead token back in the queue
+    putBackToken(secondTok);
+    // IDENT in first part of expr is followed by an "=". This can never happen if the
+    // IDENT is from rval. To check this we need to lookahead one token
+    if(secondTok.type==ASSIGN) {
+      // expr ::= IDENT "=" expr
       getNextToken(); //Consume IDENT
       getNextToken(); //Consume "="
       return std::make_unique<AssignmentExprASTNode>(ident.lexeme, std::move(ParseExpr()));
     } else {
-      //rval ::= IDENT | IDENT "(" args ")" so would be an operator_or
-      putBackToken(secondTok);
-      CurTok = ident;
+      // expr ::= operator_or
       return std::make_unique<OrExprASTNode>(std::move(ParseOperatorOr()));
     }
   }
 }
 
 // block ::= "{" local_decls stmt_list "}"
+// Declaring ParseBlock() here due to cycle in grammar
 std::unique_ptr<BlockASTNode> ParseBlock();
 
 // else_stmt ::= "else" block
 //             | ε
+// TODO: why is this like this
 std::unique_ptr<ElseStmtASTNode> ParseElseStmt() {
   if(CurTok.type!=ELSE) {
     std::vector<TOKEN_TYPE> followSet =	{NOT, LPAR, MINUS, SC, IF, RETURN, WHILE, LBRA, RBRA, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
@@ -1654,13 +1690,15 @@ std::unique_ptr<ElseStmtASTNode> ParseElseStmt() {
 
 // if_stmt ::= "if" "(" expr ")" block else_stmt
 std::unique_ptr<IfStmtASTNode> ParseIfStmt() {
-  //"(" expr ")" block else_stmt
+  // If token already consumed in ParseStmt() so check the left parenthesis
   if(CurTok.type!=LPAR) {
     HandleError("Expected '(' in if production");
     return nullptr;
   }
   getNextToken(); //Consume (
+  // Get the expr
   std::unique_ptr<ExprASTNode> expr = std::move(ParseExpr());
+  // Check the expr is followed by ")"
   if(CurTok.type!=RPAR) {
     HandleError("Expected '(' in if production");
     return nullptr;
@@ -1676,16 +1714,19 @@ std::unique_ptr<IfStmtASTNode> ParseIfStmt() {
 //        | if_stmt
 //        | while_stmt
 //        | return_stmt
+// Declaring ParseStmt() here due to cycle in grammar
 std::unique_ptr<StmtASTNode> ParseStmt();
 
 // while_stmt ::= "while" "(" expr ")" stmt
 std::unique_ptr<WhileStmtASTNode> ParseWhileStmt() {
+  // While token consumed in ParseExpr() so check left parenthesis
   if(CurTok.type!=LPAR) {
     HandleError("Expected '(' in while production");
     return nullptr;
   }
   getNextToken(); //Consume (
   std::unique_ptr<ExprASTNode> expr = std::move(ParseExpr());
+  // Check expression is followed by ")"
   if(CurTok.type!=RPAR) {
     HandleError("Expected ')' in if production");
     return nullptr;
@@ -1698,12 +1739,15 @@ std::unique_ptr<WhileStmtASTNode> ParseWhileStmt() {
 // return_stmt ::= "return" ";"
 //               | "return" expr ";"
 std::unique_ptr<ReturnStmtASTNode> ParseReturnStmt() {
-  //";" | expr ";"  
+  // Return token consumed in ParseStmt() so check expr or semicolon
+  // ";" | expr ";"
+  // Check case with no expr first
   if(CurTok.type==SC) {
     getNextToken(); //Consume ;
     return std::make_unique<ReturnStmtASTNode>(nullptr);
   }
   std::unique_ptr<ExprASTNode> expr = std::move(ParseExpr());
+  // Ensure return expr is followed by a semicolon
   if(CurTok.type!=SC) {
     HandleError("Expected ';' in return production");
     return nullptr;
@@ -1715,12 +1759,13 @@ std::unique_ptr<ReturnStmtASTNode> ParseReturnStmt() {
 // expr_stmt ::= expr ";"
 //             | ";"
 std::unique_ptr<ExprStmtASTNode> ParseExprStmt() {
-  //";" | expr ";"  
+  // Check case with no expr first
   if(CurTok.type==SC) {
     getNextToken(); //Consume ;
     return std::make_unique<ExprStmtASTNode>(nullptr);
   }
   std::unique_ptr<ExprASTNode> expr = std::move(ParseExpr());
+  // Ensure expr is followed by semicolon
   if(CurTok.type!=SC) {
     HandleError("Expected ';' in expr_stmt production");
     return nullptr;
@@ -1735,24 +1780,25 @@ std::unique_ptr<ExprStmtASTNode> ParseExprStmt() {
 //        | while_stmt
 //        | return_stmt
 std::unique_ptr<StmtASTNode> ParseStmt() {
-  //expr, block, if, while, return
+  // Declare statement
   std::unique_ptr<StmtASTNode> stmt;
+  // Handle if statement
   if(CurTok.type==IF) {
     getNextToken(); //Consume IF
-    //IF
     stmt = std::move(ParseIfStmt());
+  // Handle while statement
   } else if(CurTok.type==WHILE) {
     getNextToken(); //Consume WHILE
-    //WHILE
     stmt = std::move(ParseWhileStmt());
+  // Handle return statement
   } else if(CurTok.type==RETURN) {
     getNextToken(); //Consume RETURN
     stmt = std::move(ParseReturnStmt());
-    //RETURN
+  // Handle block
   } else if(CurTok.type==LBRA) {
     stmt = std::move(ParseBlock());
+  // Handle expr_stmt
   } else {
-    //EXPR_STMT
     stmt = std::move(ParseExprStmt());
   }
   return std::move(stmt);
@@ -1761,7 +1807,9 @@ std::unique_ptr<StmtASTNode> ParseStmt() {
 // stmt_list ::= stmt stmt_list
 //             | ε
 std::vector<std::unique_ptr<StmtASTNode>> ParseStmtList() {
+  // Declare statement list
   std::vector<std::unique_ptr<StmtASTNode>> stmtList;
+  // Keep parsing statements until the current token is not in the first set of stmt_list
   bool isStmt = true;
   while(isStmt) {
     std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, SC, IF, RETURN, WHILE, LBRA, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
@@ -1772,25 +1820,20 @@ std::vector<std::unique_ptr<StmtASTNode>> ParseStmtList() {
       stmtList.push_back(std::move(ParseStmt()));
     }
   }
-  if(stmtList.empty()) {
-    HandleError("Expected '!', '(', '-', ';', BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT in stmt production");
-    return std::vector<std::unique_ptr<StmtASTNode>>();
-  }
   return std::move(stmtList);
 }
 
 // block ::= "{" local_decls stmt_list "}"
 std::unique_ptr<BlockASTNode> ParseBlock() {
-  //"{" local_decls stmt_list "}" 
   if (CurTok.type!=LBRA) {
     HandleError("Expected '{' in block production");
     return nullptr;
   }
   getNextToken(); //Consume "{"
-  //local_decls
+  // Declare lists
   std::vector<std::unique_ptr<LocalDeclASTNode>> localDecls = std::move(ParseLocalDecls());
-  //stmt_list
   std::vector<std::unique_ptr<StmtASTNode>> statements = std::move(ParseStmtList());
+  // Check block ends in "}"
   if (CurTok.type!=RBRA) {
     HandleError("Expected '}' in block production");
     return nullptr;
@@ -1801,13 +1844,16 @@ std::unique_ptr<BlockASTNode> ParseBlock() {
 
 // extern_list ::= extern extern_list
 //               | extern
+// extern ::= "extern" type_spec IDENT "(" params ")" ";"
+// Handles both productions
 std::vector<std::unique_ptr<ExternASTNode>> ParseExternList() {
   std::vector<std::unique_ptr<ExternASTNode>> externList;
   TOKEN type;
   std::string ident;
-  //"extern" type_spec IDENT "(" params ")" ";"
+  // Keep parsing extern until current token is not an extern
   while(CurTok.type == EXTERN) {
     getNextToken(); //Consume "extern"
+    // Handle type_spec
     if(CurTok.type==BOOL_TOK || CurTok.type==INT_TOK || CurTok.type==VOID_TOK || CurTok.type==FLOAT_TOK) {
       type = CurTok;
     } else {
@@ -1815,6 +1861,7 @@ std::vector<std::unique_ptr<ExternASTNode>> ParseExternList() {
       return std::vector<std::unique_ptr<ExternASTNode>>();
     }
     getNextToken(); //Consumes type_spec
+    // Handle ident
     if (CurTok.type==IDENT) {
       ident = CurTok.lexeme;
     } else {
@@ -1822,35 +1869,45 @@ std::vector<std::unique_ptr<ExternASTNode>> ParseExternList() {
       return std::vector<std::unique_ptr<ExternASTNode>>();
     }
     getNextToken(); //Consumes IDENT
+    // Check there is a left parenthesis
     if (CurTok.type!=LPAR) {
       HandleError("Expected token '(' in extern production");
       return std::vector<std::unique_ptr<ExternASTNode>>();
     }
     getNextToken(); //Consume "("
-    std::unique_ptr<ParamsASTNode> params = std::move(ParseParams()); //Parses params
+    // Parse and store the params of an extern function
+    std::unique_ptr<ParamsASTNode> params = std::move(ParseParams());
+    // Check extern ends in a semicolon
     if (CurTok.type!=SC) {
       HandleError("Expected ';' in extern production");
       return std::vector<std::unique_ptr<ExternASTNode>>();
     }
     getNextToken(); //Consumes ";"
+    // Add extern to the externList
     externList.push_back(std::make_unique<ExternASTNode>(type, ident, std::move(params)));
   }
+  // If an extern is never encountered an empty vector is returned
+  // Otherwise the list containing all externs is returned
   return std::move(externList);
 };
 
 // var_decl ::= var_type IDENT ";"
 std::unique_ptr<VarDeclASTNode> ParseVarDecl() {
+  // Check first set of var_decl
   if (CurTok.type!=INT_TOK && CurTok.type!=FLOAT_TOK && CurTok.type!=BOOL_TOK) {
     HandleError("Expected BOOL_TOK, INT_TOK, FLOAT_TOK in var_decl production");
     return nullptr;
   }
   TOKEN varType = CurTok;
-  std::string ident = getNextToken().lexeme; //Consume var_type
+  getNextToken(); //Consume var_type
+  // Check next token is an ident
   if (CurTok.type!=IDENT) {
     HandleError("Expected IDENT in var_decl production");
     return nullptr;
   }
+  std::string ident = CurTok.lexeme; 
   getNextToken(); //Consume IDENT
+  // CHeck var_decl ends in semicolon
   if(CurTok.type!=SC) {
     HandleError("Expected ';' in var_decl production");
     return nullptr;
@@ -1861,51 +1918,57 @@ std::unique_ptr<VarDeclASTNode> ParseVarDecl() {
 
 // fun_decl ::= type_spec IDENT "(" params ")" block
 std::unique_ptr<FunDeclASTNode> ParseFunDecl() {
-  TOKEN varType;
-  std::string ident;
+  // Check fun_decl first set
   if (CurTok.type!=INT_TOK && CurTok.type!=FLOAT_TOK && CurTok.type!=BOOL_TOK && CurTok.type!=VOID_TOK) {
     HandleError("Expected BOOL_TOK, INT_TOK, FLOAT_TOK in fun_decl production");
     return nullptr;
-  } else {
-    varType = CurTok;
   }
+  TOKEN varType = CurTok;
   getNextToken(); //Consumes type_spec
-  if (CurTok.type==IDENT) {
-    ident = CurTok.lexeme;
-  } else {
+  if (CurTok.type!=IDENT) {
     HandleError("Expected IDENT in fun_decl production");
     return nullptr;
   }
+  std::string ident = CurTok.lexeme;
   getNextToken(); //Consumes IDENT
+  // Check for left parenthesis
   if (CurTok.type!=LPAR) {
     HandleError("Expected token '(' in fun_decl production");
     return nullptr;
   }
   getNextToken(); //Consume "("
-  std::unique_ptr<ParamsASTNode> params = std::move(ParseParams()); //Parses params
-  std::unique_ptr<BlockASTNode> block = std::move(ParseBlock()); //Parses block
+  // Parse the function's parameters and body
+  std::unique_ptr<ParamsASTNode> params = std::move(ParseParams());
+  std::unique_ptr<BlockASTNode> block = std::move(ParseBlock());
   return std::make_unique<FunDeclASTNode>(varType, ident, std::move(params), std::move(block));
 }
 
 // decl_list ::= decl decl_list
 //             | decl
+// decl ::= var_decl 
+//        | fun_decl
+// Combines the two productions together
 std::vector<std::unique_ptr<DeclASTNode>> ParseDeclList() {
   std::vector<std::unique_ptr<DeclASTNode>> declList;
   bool isDecl = true;
+  // Parse decls until there are none left
   while(isDecl) {
-    // Doing this requires a lookahead since the difference between them (unless theres a void) is 3 tokens ahead
+    // Determining which the type of decl requires a lookahead since 
+    // the difference between them (unless it's a void function decl) is 3 tokens ahead
     TOKEN current = CurTok;
     TOKEN secondTok = getNextToken();  
     TOKEN thirdTok = getNextToken();
+    // Get the lookaheads then put them back in the queue
     putBackToken(thirdTok);
     putBackToken(secondTok);
     CurTok = current;
+    // Must be a var_decl
     if (thirdTok.type == SC) {
-      //Is var_decl
       declList.push_back(std::move(ParseVarDecl()));
+    // Must be a fun_decl
     } else if(thirdTok.type == LPAR || current.type == VOID_TOK) {
-      //Is fun_decl
       declList.push_back(std::move(ParseFunDecl()));
+    // No more decls to parse
     } else {
       isDecl = false;
     }
@@ -1916,12 +1979,7 @@ std::vector<std::unique_ptr<DeclASTNode>> ParseDeclList() {
 // program ::= extern_list decl_list
 //           | decl_list
 static std::unique_ptr<ProgramASTNode> parser() {
-  std::vector<std::unique_ptr<ExternASTNode>> externList;
-  if (CurTok.type == EXTERN) {
-    externList = std::move(ParseExternList());
-  } else {
-    externList = std::vector<std::unique_ptr<ExternASTNode>>();
-  }  
+  std::vector<std::unique_ptr<ExternASTNode>> externList = std::move(ParseExternList());
   std::vector<std::unique_ptr<DeclASTNode>> declList = std::move(ParseDeclList());
   return std::make_unique<ProgramASTNode>(std::move(externList), std::move(declList)); 
 }
