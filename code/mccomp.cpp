@@ -38,7 +38,7 @@ using namespace llvm::sys;
 
 //TODO: 
 // - Test Parsing and Codegen
-// - Comments
+// - Comment codegen
 // - Report
 // - remove unnecessary nodes from printing
 
