@@ -400,6 +400,7 @@ static std::unique_ptr<Module> TheModule;
 
 //Tables for local variables, global variables and functions
 static std::map<std::string, AllocaInst*> NamedValues; 
+static std::vector<std::string> localD;
 static std::map<std::string, Function *> Functions;
 static std::map<std::string, GlobalVariable *> Globals;
 
@@ -2139,7 +2140,11 @@ Value *LocalDeclASTNode::codegen() {
   Function *function = currBlock->getParent();
   Type *type = GetTypeOfToken(VarType);
   if(NamedValues[Ident]) {
-    return HandleErrorValue("Local variable declared multiple times.");
+    // Variable has been previously defined in this block
+    if(std::find(localD.begin(), localD.end(), Ident)!=localD.end()) {
+      return HandleErrorValue("Local variable declared multiple times.");
+    }
+    localD.push_back(Ident);
   }  
   AllocaInst *alloca = CreateEntryBlockAlloca(function, Ident, type);
   NamedValues[Ident] = alloca;
@@ -2160,10 +2165,11 @@ Value *BlockASTNode::codegen() {
   }
   //Now want to remove any new variables from NamedVals;
   for(auto &&kvp : NamedValues) {
-    if(OldNamedVals.count(kvp.first)!=0) {
+    if(OldNamedVals.count(kvp.first)!=0 && std::find(localD.begin(), localD.end(), kvp.first)==localD.end()) {
       OldNamedVals[kvp.first] = NamedValues[kvp.first];
     }
   }
+  localD.clear();
   NamedValues.clear();
   NamedValues.insert(OldNamedVals.begin(), OldNamedVals.end());
   return Constant::getNullValue(Builder.getInt1Ty());
@@ -2562,43 +2568,63 @@ Value *EquivASTNode::codegen() {
 }
 
 Value *AndASTNode::codegen() {
+  // Value *LHS = Left->codegen();
+  // if(!Right) {
+  //   return LHS;
+  // }
+  // Function* function = Builder.GetInsertBlock()->getParent();
+  // // Create blocks for evaluating RHS, true block, and result
+  // BasicBlock *rhs_ = BasicBlock::Create(Builder.getContext(), "rhs_", function);
+  // BasicBlock *end_ = BasicBlock::Create(Builder.getContext(), "end_", function);
+  // Builder.CreateCondBr(LHS, rhs_, end_);
+  // Builder.SetInsertPoint(rhs_);
+  // Value *RHS = Right->codegen();
+  // Builder.CreateBr(end_);
+  // Builder.SetInsertPoint(end_);
+  // PHINode *Result = Builder.CreatePHI(Builder.getInt1Ty(), 2, "ortmp");
+  // Result->addIncoming(ConstantInt::get(Type::getInt1Ty(TheContext), APInt(1, 0, true)), end_);
+  // Result->addIncoming(RHS, rhs_);
+  // return Result;
   Value *LHS = Left->codegen();
   if(!Right) {
     return LHS;
   }
-  Function* function = Builder.GetInsertBlock()->getParent();
-  // Create blocks for evaluating RHS, true block, and result
-  BasicBlock *rhs_ = BasicBlock::Create(Builder.getContext(), "rhs_", function);
-  BasicBlock *end_ = BasicBlock::Create(Builder.getContext(), "end_", function);
-  Builder.CreateCondBr(LHS, rhs_, end_);
-  Builder.SetInsertPoint(rhs_);
   Value *RHS = Right->codegen();
-  Builder.CreateBr(end_);
-  Builder.SetInsertPoint(end_);
-  PHINode *Result = Builder.CreatePHI(Builder.getInt1Ty(), 2, "ortmp");
-  Result->addIncoming(ConstantInt::get(Type::getInt1Ty(TheContext), APInt(1, 0, true)), end_);
-  Result->addIncoming(RHS, rhs_);
-  return Result;
+  //Ors should only be done on booleans. 
+  //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
+  LHS = AttemptCast(Builder.getInt1Ty(), LHS);
+  RHS = AttemptCast(Builder.getInt1Ty(), RHS);
+  return Builder.CreateBinOp(Instruction::And, LHS, RHS, "and");
 }
 
 Value *OrASTNode::codegen() {  
+  // Value *LHS = Left->codegen();
+  // if(!Right) {
+  //   return LHS;
+  // }
+  // Function* function = Builder.GetInsertBlock()->getParent();
+  // // Create blocks for evaluating RHS, true block, and result
+  // BasicBlock *rhs_ = BasicBlock::Create(Builder.getContext(), "rhs_", function);
+  // BasicBlock *end_ = BasicBlock::Create(Builder.getContext(), "end_", function);
+  // Builder.CreateCondBr(LHS, end_, rhs_);
+  // Builder.SetInsertPoint(rhs_);
+  // Value *RHS = Right->codegen();
+  // Builder.CreateBr(end_);
+  // Builder.SetInsertPoint(end_);
+  // PHINode *Result = Builder.CreatePHI(Builder.getInt1Ty(), 2, "ortmp");
+  // Result->addIncoming(ConstantInt::get(Type::getInt1Ty(TheContext), APInt(1, 1, true)), end_);
+  // Result->addIncoming(RHS, rhs_);
+  // return Result;
   Value *LHS = Left->codegen();
   if(!Right) {
     return LHS;
   }
-  Function* function = Builder.GetInsertBlock()->getParent();
-  // Create blocks for evaluating RHS, true block, and result
-  BasicBlock *rhs_ = BasicBlock::Create(Builder.getContext(), "rhs_", function);
-  BasicBlock *end_ = BasicBlock::Create(Builder.getContext(), "end_", function);
-  Builder.CreateCondBr(LHS, end_, rhs_);
-  Builder.SetInsertPoint(rhs_);
   Value *RHS = Right->codegen();
-  Builder.CreateBr(end_);
-  Builder.SetInsertPoint(end_);
-  PHINode *Result = Builder.CreatePHI(Builder.getInt1Ty(), 2, "ortmp");
-  Result->addIncoming(ConstantInt::get(Type::getInt1Ty(TheContext), APInt(1, 1, true)), end_);
-  Result->addIncoming(RHS, rhs_);
-  return Result;
+  //Ors should only be done on booleans. 
+  //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
+  LHS = AttemptCast(Builder.getInt1Ty(), LHS);
+  RHS = AttemptCast(Builder.getInt1Ty(), RHS);
+  return Builder.CreateBinOp(Instruction::Or, LHS, RHS, "or");
 }
 
 Value *OrExprASTNode::codegen() {
