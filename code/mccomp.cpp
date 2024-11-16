@@ -40,7 +40,6 @@ using namespace llvm::sys;
 // - Test Parsing and Codegen
 // - Comments
 // - Report
-// - Add grammar rules above AST nodes and parser funcs
 // - remove unnecessary nodes from printing
 
 FILE *pFile;
@@ -408,6 +407,8 @@ static std::map<std::string, GlobalVariable *> Globals;
 // AST nodes
 //===----------------------------------------------------------------------===//
 
+// StmtType - Enum representing statement types, used in each StmtASTNode
+// Used to easily distinguish different statements, especially return statements within codegen
 enum StmtType {
   EXPR = 1,
   BLOCK = 2,
@@ -415,9 +416,9 @@ enum StmtType {
   ELSESTMT = 4,
   WHILESTMT = 5,
   RETSTMT = 6
-};
+}; 
 
-/// ASTnode - Base class for all AST nodes.
+// ASTnode - Base class for all AST nodes.
 class ASTnode {
 public:
   virtual ~ASTnode() {}
@@ -425,6 +426,7 @@ public:
   virtual std::string to_string(int indent) const {return "";};
 };
 
+// ParamASTNode - Represents a parameter to a function/extern function
 class ParamASTNode : public ASTnode {
 public:
   std::string Ident;
@@ -447,6 +449,8 @@ public:
   }
 };
 
+// ParamsASTNode - Represents a group of parameters to a function/extern function
+// If the parameter is void, then IsVoid = true and ParamList is empty.
 class ParamsASTNode : public ASTnode {
 public:
   bool IsVoid;
@@ -472,7 +476,8 @@ public:
   }
 };
 
-// ExternASTNode - Class for extern declarations
+// ExternASTNode - Represents extern function declarations
+// Params can = nullptr to represent function with no arguments
 class ExternASTNode : public ASTnode {
   TOKEN VarType;
   std::string FuncName;
@@ -504,6 +509,7 @@ public:
   }
 };
 
+// LocalDeclASTNode - Represents a local variable declaration within a function/block
 class LocalDeclASTNode : public ASTnode {
   TOKEN VarType;
 
@@ -527,12 +533,21 @@ public:
   }
 };
 
+// StmtASTNode - Abstract parent class to all statement types
+// Children:
+//      - BlockASTNode
+//      - ExprStmtASTNode
+//      - IfStmtASTNode
+//      - WhileStmtASTNode
+//      - ReturnStmtASTNode
 class StmtASTNode : public ASTnode {
 public:
-  virtual StmtType stmtType();
+  virtual StmtType stmtType(); // Function which gets the type of a statement
   virtual ~StmtASTNode() {}
 };
 
+// BlockASTNode - Represents a code block
+// Both LocalDecls and Statements can be empty lists as the productions are nullable
 class BlockASTNode : public StmtASTNode {
 public:
   std::vector<std::unique_ptr<LocalDeclASTNode>> LocalDecls;
@@ -567,6 +582,7 @@ public:
   }
 };
 
+// DeclASTNode - Parent class for FunDecl and VarDecl
 class DeclASTNode : public ASTnode {
 public:
   DeclASTNode() {}
@@ -577,6 +593,7 @@ public:
 };
 
 // FunDeclASTNode - Class for function declarations
+// Params can be a nullptr as params is nullable in the grammar
 class FunDeclASTNode : public DeclASTNode {
   TOKEN VarType;
   std::string FuncName;
@@ -616,6 +633,7 @@ public:
   }
 };
 
+// VarDeclASTNode - Represents a global variable declaration
 class VarDeclASTNode : public DeclASTNode {
   TOKEN VarType;
   std::string Ident;
@@ -639,8 +657,8 @@ public:
   }
 };
 
+// ElseStmtASTNode - Represents the else part of an if-else statement
 class ElseStmtASTNode : public StmtASTNode {
-
 public:
   std::unique_ptr<BlockASTNode> Block;
   ElseStmtASTNode(std::unique_ptr<BlockASTNode> block) : Block(std::move(block)) {}
@@ -661,12 +679,21 @@ public:
   }
 };
 
+// RValASTNode - Abstract parent class of every type of rval defined in the grammar
+// Children:
+//     - IdentRvalASTNode
+//     - ExprASTNode
+//     - UnaryOpRValASTNode
+//     - FunctionCallASTNode
+//     - IntASTNode
+//     - BoolASTNode
+//     - FloatASTNode
 class RValASTNode : public ASTnode {
 public:
-  RValASTNode() {}
+  virtual ~RValASTNode() {}
 };
 
-//IDENT in rval ::= production
+// IdentRvalASTNode - Represents a stored variable used in an expression
 class IdentRvalASTNode : public RValASTNode {
   std::string Ident;
 
@@ -684,18 +711,23 @@ public:
   }
 };
 
-//Expression Superclass
+// ExprASTNode - Abstract parent class for expressions
+// Children:
+//    - AssignmentExprASTNode
+//    - OrASTNode
 class ExprASTNode : public RValASTNode {
 public:
   virtual ~ExprASTNode() {}
 };
 
+// ExprStmtASTNode - Represents an expr_stmt
+// Expr can be a nullptr according to the grammar
 class ExprStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
 public:
   ExprStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {}
   StmtType stmtType() override {
-    return StmtType::EXPR;
+    return EXPR;
   }
   Value *codegen() override;
   std::string to_string(int indent) const override {
@@ -712,6 +744,8 @@ public:
   }
 };
 
+// IfStmtASTNode - Represents an if statement
+// Else pointer can = nullptr if there is no else
 class IfStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
 
@@ -720,7 +754,7 @@ public:
   std::unique_ptr<ElseStmtASTNode> ElseStmt;
   IfStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<BlockASTNode> block, std::unique_ptr<ElseStmtASTNode> elsestmt) : Expr(std::move(expr)), Block(std::move(block)), ElseStmt(std::move(elsestmt)) {}
   StmtType stmtType() override {
-    return StmtType::IFSTMT;
+    return IFSTMT;
   }
   Value *codegen() override;
   std::string to_string(int indent) const override {
@@ -748,6 +782,7 @@ public:
   }
 };
 
+// WhileStmtASTNode - Represents a while statement
 class WhileStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
   std::unique_ptr<StmtASTNode> Statement;
@@ -755,7 +790,7 @@ class WhileStmtASTNode : public StmtASTNode {
 public:
   WhileStmtASTNode(std::unique_ptr<ExprASTNode> expr, std::unique_ptr<StmtASTNode> statement) : Expr(std::move(expr)), Statement(std::move(statement)) {}
   StmtType stmtType() override {
-    return StmtType::WHILESTMT;
+    return WHILESTMT;
   }
   Value *codegen() override;
   std::string to_string(int indent) const override {
@@ -774,13 +809,14 @@ public:
   }
 };
 
+// ReturnStmtASTNode - Represents a return statement
 class ReturnStmtASTNode : public StmtASTNode {
   std::unique_ptr<ExprASTNode> Expr;
 
 public: 
   ReturnStmtASTNode(std::unique_ptr<ExprASTNode> expr) : Expr(std::move(expr)) {}
   StmtType stmtType() override {
-    return StmtType::RETSTMT;
+    return RETSTMT;
   }
   Value *codegen() override;
   std::string to_string(int indent) const override {
@@ -796,7 +832,7 @@ public:
   }
 };
 
-/// UnaryOpRValASTNode
+// UnaryOpRValASTNode - Represents a negated or not rval
 class UnaryOpRValASTNode : public RValASTNode {
   TOKEN Op;
   std::unique_ptr<RValASTNode> RVal;
@@ -819,7 +855,7 @@ public:
   }
 };
 
-//expr ::= IDENT "=" expr in production
+// AssignmentExprASTNode - Represents an assignment of an expression to a variable
 class AssignmentExprASTNode : public ExprASTNode {
   std::string Ident;
   std::unique_ptr<ExprASTNode> SubExpr;
@@ -843,6 +879,8 @@ public:
   }
 };
 
+// ArgListASTNode - Represents a list of expressions that are arguments for a function call
+// Exprs vector can be empty according to the grammar
 class ArgListASTNode : public ASTnode {
 public:
   std::vector<std::unique_ptr<ExprASTNode>> Exprs;
@@ -865,7 +903,7 @@ public:
   }
 };
 
-//Function call in rval ::= production
+// FunctionCallASTNode - Represents a call to a defined function in an expression
 class FunctionCallASTNode : public RValASTNode {
   std::string FuncName;
   std::unique_ptr<ArgListASTNode> Args;
@@ -888,13 +926,11 @@ public:
   }
 };
 
-/// IntASTNode - Class for integer literals like 1, 2, 10,
+// IntASTNode - Represents an integer literal
 class IntASTNode : public RValASTNode {
   int Val;
-  TOKEN Tok;
-
 public:
-  IntASTNode(int val, TOKEN tok) : Val(val), Tok(tok) {}
+  IntASTNode(int val) : Val(val) {}
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
@@ -910,13 +946,12 @@ public:
   }
 };
 
-/// BoolASTNode - Class for boolean literals true and false
+// BoolASTNode - Represents a boolean literal
 class BoolASTNode : public RValASTNode {
   bool Val;
-  TOKEN Tok;
 
 public:
-  BoolASTNode(bool val, TOKEN tok) : Val(val), Tok(tok) {}
+  BoolASTNode(bool val) : Val(val) {}
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
@@ -932,13 +967,12 @@ public:
   }
 };
 
-/// FloatASTNode - Class for float literals like 1.4, 3.5, 60
+// FloatASTNode - Represents a float literal
 class FloatASTNode : public RValASTNode {
   float Val;
-  TOKEN Tok;
 
 public:
-  FloatASTNode(float val, TOKEN tok) : Val(val), Tok(tok) {}
+  FloatASTNode(float val) : Val(val) {}
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "Rval\n";
@@ -954,8 +988,9 @@ public:
   }
 };
 
+// TimesASTNode - Represents two expressions multiplied/divided/modulused together
+// Right and Op can be null according to spec
 class TimesASTNode : public ASTnode {
-
 public:
   std::unique_ptr<RValASTNode> Left;
   std::unique_ptr<TimesASTNode> Right;
@@ -991,8 +1026,9 @@ public:
   }
 };
 
+// AddASTNode - Represents two expressions added/subtracted together
+// Right and Op can be null according to spec
 class AddASTNode : public ASTnode {
-
 public:
   std::unique_ptr<TimesASTNode> Left;
   std::unique_ptr<AddASTNode> Right;
@@ -1028,11 +1064,12 @@ public:
   }
 };
 
+// CompASTNode - Represents two expressions compared with "<"/"<="/">"/">"
+// Right and Op can be null according to spec
 class CompASTNode : public ASTnode {
   std::unique_ptr<AddASTNode> Left;
   std::unique_ptr<CompASTNode> Right;
   TOKEN Op;
-
 public:
   CompASTNode(std::unique_ptr<AddASTNode> left, std::unique_ptr<CompASTNode> right, TOKEN op) : Left(std::move(left)), Right(std::move(right)), Op(op) {}
   Value* codegen() override;
@@ -1065,6 +1102,8 @@ public:
   }
 };
 
+// EquivASTNode - Represents two expressions compared with "=="/"!="
+// Right and Op can be null according to spec
 class EquivASTNode : public ASTnode {
   std::unique_ptr<CompASTNode> Left;
   std::unique_ptr<EquivASTNode> Right;
@@ -1102,6 +1141,8 @@ public:
   }
 };
 
+// AndASTNode - Represents two expressions &&'ed together
+// Right and Op can be null according to spec
 class AndASTNode : public ASTnode {
   std::unique_ptr<EquivASTNode> Left;
   std::unique_ptr<AndASTNode> Right;
@@ -1138,6 +1179,8 @@ public:
   }
 };
 
+// OrASTNode - Represents two expressions ||'ed together
+// Right and Op can be null according to spec
 class OrASTNode : public ASTnode {
   std::unique_ptr<AndASTNode> Left;
   std::unique_ptr<OrASTNode> Right;
@@ -1174,7 +1217,7 @@ public:
   }
 };
 
-//expr ::= operator_or in production
+// OrExprASTNode - Represents a non assignment expression
 class OrExprASTNode : public ExprASTNode {
   std::unique_ptr<OrASTNode> OrExpression;
 
@@ -1192,7 +1235,8 @@ public:
   }
 };
 
-/// ProgramASTNode - Class for program
+// ProgramASTNode - Represents the first production in the grammar
+// ExternList can be empty, DeclList cannot
 class ProgramASTNode : public ASTnode {
 
 public:
@@ -1232,7 +1276,12 @@ static void HandleError(const char *str) {
   exit(0);
 }
 
-
+// params ::= param_list  
+//          |  "void" | epsilon
+// param_list ::= param "," param_list
+// 	|   param
+// param ::= var_type IDENT
+// Combines params, param_list and param into one production
 std::unique_ptr<ParamsASTNode> ParseParams() {
   //Params consist of vector of paramast
   //Parse void case first
@@ -1271,6 +1320,7 @@ std::unique_ptr<ParamsASTNode> ParseParams() {
   return std::make_unique<ParamsASTNode>(std::move(paramList), false);  
 };
 
+// local_decl ::= var_type IDENT ";"
 std::unique_ptr<LocalDeclASTNode> ParseLocalDecl() {
   TOKEN varType = CurTok;
   getNextToken(); //Consume var_type
@@ -1288,6 +1338,8 @@ std::unique_ptr<LocalDeclASTNode> ParseLocalDecl() {
   return std::make_unique<LocalDeclASTNode>(varType, ident);
 }
 
+// local_decls ::= local_decl local_decls
+// 	             | epsilon
 std::vector<std::unique_ptr<LocalDeclASTNode>> ParseLocalDecls() {
   //local decl or epsilon
   //for epsilon case check follow set so we dont error
@@ -1307,6 +1359,11 @@ std::vector<std::unique_ptr<LocalDeclASTNode>> ParseLocalDecls() {
 
 std::unique_ptr<ExprASTNode> ParseExpr();
 
+// args ::= arg_list 
+//        |  epsilon
+// arg_list ::= expr "," arg_list
+// 	          |   expr
+//Combines both productions into one by checking the epsilon case then going into the arg_list production
 std::unique_ptr<ArgListASTNode> ParseArgs() {
   std::vector<std::unique_ptr<ExprASTNode>> exprs;
   //Args production contains epsilon so need to check follow set as well as first (which is ")")
@@ -1323,6 +1380,10 @@ std::unique_ptr<ArgListASTNode> ParseArgs() {
   return std::make_unique<ArgListASTNode>(std::move(exprs));
 }
 
+// rval ::= "-" rval | "!" rval
+//        | "(" expr ")"
+//        | IDENT | IDENT "(" args ")"
+//        | INT_LIT | FLOAT_LIT | BOOL_LIT
 std::unique_ptr<RValASTNode> ParseRval() {
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
   if (std::find(firstSet.begin(), firstSet.end(), CurTok.type) == firstSet.end()) {
@@ -1361,12 +1422,12 @@ std::unique_ptr<RValASTNode> ParseRval() {
     TOKEN tok = CurTok;
     int val = std::stoi(CurTok.lexeme);
     getNextToken(); //Consume int literal
-    return std::make_unique<IntASTNode>(val, tok);
+    return std::make_unique<IntASTNode>(val);
   } else if(CurTok.type==FLOAT_LIT) {
     TOKEN tok = CurTok;
     float val = std::stof(CurTok.lexeme);
     getNextToken(); //Consume float literal
-    return std::make_unique<FloatASTNode>(val, tok);
+    return std::make_unique<FloatASTNode>(val);
   } else {
     TOKEN tok = CurTok;
     bool val;
@@ -1376,10 +1437,14 @@ std::unique_ptr<RValASTNode> ParseRval() {
       val = false;
     }
     getNextToken(); //Consume bool literal
-    return std::make_unique<BoolASTNode>(val, tok);
+    return std::make_unique<BoolASTNode>(val);
   }
 }
 
+// operator_times ::= rval "*" operator_times
+//                  | rval "/" operator_times
+//                  | rval "%" operator_times
+//                  | rval
 std::unique_ptr<TimesASTNode> ParseOperatorTimes() {
   std::unique_ptr<RValASTNode> left;
   std::unique_ptr<TimesASTNode> right = nullptr;
@@ -1404,6 +1469,9 @@ std::unique_ptr<TimesASTNode> ParseOperatorTimes() {
   return std::make_unique<TimesASTNode>(std::move(left), std::move(right), op);
 }
 
+// operator_add ::= operator_times "+" operator_add
+//                | operator_times "-" operator_add
+//                | operator_times
 std::unique_ptr<AddASTNode> ParseOperatorAdd() {
   std::unique_ptr<TimesASTNode> left;
   std::unique_ptr<AddASTNode> right = nullptr;
@@ -1428,6 +1496,11 @@ std::unique_ptr<AddASTNode> ParseOperatorAdd() {
   return std::make_unique<AddASTNode>(std::move(left), std::move(right), op);
 }
 
+// operator_comp ::= operator_add "<" operator_comp
+//                  | operator_add "<=" operator_comp
+//                  | operator_add ">" operator_comp
+//                  | operator_add ">=" operator_comp
+//                  | operator_add
 std::unique_ptr<CompASTNode> ParseOperatorComp() {
   std::unique_ptr<AddASTNode> left;
   std::unique_ptr<CompASTNode> right = nullptr;
@@ -1452,6 +1525,9 @@ std::unique_ptr<CompASTNode> ParseOperatorComp() {
   return std::make_unique<CompASTNode>(std::move(left), std::move(right), op);
 }
 
+// operator_equiv ::= operator_comp "==" operator_equiv
+//                  | operator_comp "!=" operator_equiv
+//                  | operator_comp
 std::unique_ptr<EquivASTNode> ParseOperatorEquiv() {
   std::unique_ptr<CompASTNode> left;
   std::unique_ptr<EquivASTNode> right = nullptr;
@@ -1476,6 +1552,8 @@ std::unique_ptr<EquivASTNode> ParseOperatorEquiv() {
   return std::make_unique<EquivASTNode>(std::move(left), std::move(right), op);
 }
 
+// operator_and ::= operator_equiv "&&" operator_and
+//               | operator_equiv
 std::unique_ptr<AndASTNode> ParseOperatorAnd() {
   std::unique_ptr<EquivASTNode> left;
   std::unique_ptr<AndASTNode> right;
@@ -1498,6 +1576,8 @@ std::unique_ptr<AndASTNode> ParseOperatorAnd() {
   return std::make_unique<AndASTNode>(std::move(left), std::move(right));
 }
 
+// operator_or ::= operator_and "||" operator_or
+//               | operator_and
 std::unique_ptr<OrASTNode> ParseOperatorOr() {
   std::unique_ptr<AndASTNode> left;
   std::unique_ptr<OrASTNode> right = nullptr;
@@ -1520,6 +1600,8 @@ std::unique_ptr<OrASTNode> ParseOperatorOr() {
   return std::make_unique<OrASTNode>(std::move(left), std::move(right));
 }
 
+// expr ::= IDENT "=" expr
+//        | operator_or
 std::unique_ptr<ExprASTNode> ParseExpr() {
   //Check that the next token will match an expr
   std::vector<TOKEN_TYPE> firstSet = {NOT, LPAR, MINUS, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
@@ -1551,8 +1633,11 @@ std::unique_ptr<ExprASTNode> ParseExpr() {
   }
 }
 
+// block ::= "{" local_decls stmt_list "}"
 std::unique_ptr<BlockASTNode> ParseBlock();
 
+// else_stmt ::= "else" block
+//             | ε
 std::unique_ptr<ElseStmtASTNode> ParseElseStmt() {
   if(CurTok.type!=ELSE) {
     std::vector<TOKEN_TYPE> followSet =	{NOT, LPAR, MINUS, SC, IF, RETURN, WHILE, LBRA, RBRA, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
@@ -1567,6 +1652,7 @@ std::unique_ptr<ElseStmtASTNode> ParseElseStmt() {
   return std::make_unique<ElseStmtASTNode>(std::move(ParseBlock()));
 }
 
+// if_stmt ::= "if" "(" expr ")" block else_stmt
 std::unique_ptr<IfStmtASTNode> ParseIfStmt() {
   //"(" expr ")" block else_stmt
   if(CurTok.type!=LPAR) {
@@ -1585,10 +1671,15 @@ std::unique_ptr<IfStmtASTNode> ParseIfStmt() {
   return std::make_unique<IfStmtASTNode>(std::move(expr), std::move(block), std::move(elseStmt));
 }
 
+// stmt ::= expr_stmt
+//        | block
+//        | if_stmt
+//        | while_stmt
+//        | return_stmt
 std::unique_ptr<StmtASTNode> ParseStmt();
 
+// while_stmt ::= "while" "(" expr ")" stmt
 std::unique_ptr<WhileStmtASTNode> ParseWhileStmt() {
-  //"(" expr ")" stmt 
   if(CurTok.type!=LPAR) {
     HandleError("Expected '(' in while production");
     return nullptr;
@@ -1604,6 +1695,8 @@ std::unique_ptr<WhileStmtASTNode> ParseWhileStmt() {
   return std::make_unique<WhileStmtASTNode>(std::move(expr), std::move(stmt));
 }
 
+// return_stmt ::= "return" ";"
+//               | "return" expr ";"
 std::unique_ptr<ReturnStmtASTNode> ParseReturnStmt() {
   //";" | expr ";"  
   if(CurTok.type==SC) {
@@ -1619,6 +1712,8 @@ std::unique_ptr<ReturnStmtASTNode> ParseReturnStmt() {
   return std::make_unique<ReturnStmtASTNode>(std::move(expr));
 }
 
+// expr_stmt ::= expr ";"
+//             | ";"
 std::unique_ptr<ExprStmtASTNode> ParseExprStmt() {
   //";" | expr ";"  
   if(CurTok.type==SC) {
@@ -1634,6 +1729,11 @@ std::unique_ptr<ExprStmtASTNode> ParseExprStmt() {
   return std::make_unique<ExprStmtASTNode>(std::move(expr));
 }
 
+// stmt ::= expr_stmt
+//        | block
+//        | if_stmt
+//        | while_stmt
+//        | return_stmt
 std::unique_ptr<StmtASTNode> ParseStmt() {
   //expr, block, if, while, return
   std::unique_ptr<StmtASTNode> stmt;
@@ -1658,6 +1758,8 @@ std::unique_ptr<StmtASTNode> ParseStmt() {
   return std::move(stmt);
 }
 
+// stmt_list ::= stmt stmt_list
+//             | ε
 std::vector<std::unique_ptr<StmtASTNode>> ParseStmtList() {
   std::vector<std::unique_ptr<StmtASTNode>> stmtList;
   bool isStmt = true;
@@ -1677,6 +1779,7 @@ std::vector<std::unique_ptr<StmtASTNode>> ParseStmtList() {
   return std::move(stmtList);
 }
 
+// block ::= "{" local_decls stmt_list "}"
 std::unique_ptr<BlockASTNode> ParseBlock() {
   //"{" local_decls stmt_list "}" 
   if (CurTok.type!=LBRA) {
@@ -1696,6 +1799,8 @@ std::unique_ptr<BlockASTNode> ParseBlock() {
   return std::make_unique<BlockASTNode>(std::move(localDecls), std::move(statements));
 }
 
+// extern_list ::= extern extern_list
+//               | extern
 std::vector<std::unique_ptr<ExternASTNode>> ParseExternList() {
   std::vector<std::unique_ptr<ExternASTNode>> externList;
   TOKEN type;
@@ -1733,6 +1838,7 @@ std::vector<std::unique_ptr<ExternASTNode>> ParseExternList() {
   return std::move(externList);
 };
 
+// var_decl ::= var_type IDENT ";"
 std::unique_ptr<VarDeclASTNode> ParseVarDecl() {
   if (CurTok.type!=INT_TOK && CurTok.type!=FLOAT_TOK && CurTok.type!=BOOL_TOK) {
     HandleError("Expected BOOL_TOK, INT_TOK, FLOAT_TOK in var_decl production");
@@ -1753,6 +1859,7 @@ std::unique_ptr<VarDeclASTNode> ParseVarDecl() {
   return std::make_unique<VarDeclASTNode>(varType, ident);
 }
 
+// fun_decl ::= type_spec IDENT "(" params ")" block
 std::unique_ptr<FunDeclASTNode> ParseFunDecl() {
   TOKEN varType;
   std::string ident;
@@ -1780,6 +1887,8 @@ std::unique_ptr<FunDeclASTNode> ParseFunDecl() {
   return std::make_unique<FunDeclASTNode>(varType, ident, std::move(params), std::move(block));
 }
 
+// decl_list ::= decl decl_list
+//             | decl
 std::vector<std::unique_ptr<DeclASTNode>> ParseDeclList() {
   std::vector<std::unique_ptr<DeclASTNode>> declList;
   bool isDecl = true;
@@ -1805,6 +1914,7 @@ std::vector<std::unique_ptr<DeclASTNode>> ParseDeclList() {
 };
 
 // program ::= extern_list decl_list
+//           | decl_list
 static std::unique_ptr<ProgramASTNode> parser() {
   std::vector<std::unique_ptr<ExternASTNode>> externList;
   if (CurTok.type == EXTERN) {
@@ -1889,7 +1999,7 @@ static Value* AttemptCast(Type *goalType, Value *v) {
   }  
 }
 
-//TYPES ARE VOID, BOOL -> INT -> FLOAT
+//Returns the highest type of two types where hierarchy goes float -> int -> bool
 static Type* HighestType(Type *t1, Type *t2) {
   if(t1->isFloatTy() || t2->isFloatTy()) {
     return Builder.getFloatTy();

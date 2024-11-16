@@ -39,31 +39,25 @@ return_stmt ::= "return" ";"
 # operators in order of increasing precedence    
 expr ::= IDENT "=" expr
         | operator_or  
-operator_or ::= operator_and operator_or'
-operator_or' ::= "||" operator_and operator_or'
-		| epsilon
-operator_and ::= operator_equiv operator_and'
-operator_and' ::= "&&" operator_equiv operator_and'
-		| epsilon
-operator_equiv ::= operator_comp operator_equiv'
-operator_equiv' ::= "==" operator_comp operator_equiv'
-		| "!=" operator_comp operator_equiv'
-		| epsilon
-operator_comp ::= operator_add operator_comp'
-operator_comp' ::= "<" operator_add operator_comp'
-		| "<=" operator_add operator_comp'
-		| ">" operator_add operator_comp'
-		| ">=" operator_add operator_comp'
-		| epsilon
-operator_add ::= operator_times operator_add'
-operator_add' ::= "+" operator_times operator_add'
-		| "-" operator_times operator_add'
-		| epsilon
-operator_times ::= rval operator_times'
-operator_times' ::= "*" rval operator_times'
-		| "/" rval operator_times'
-		| "%" rval operator_times'
-		| epsilon
+operator_or ::= operator_and "||" operator_or
+		| operator_and
+operator_and ::= operator_equiv "&&" operator_and
+		| operator_equiv
+operator_equiv ::= operator_comp "==" operator_equiv
+		| operator_comp "!=" operator_equiv
+		| operator_comp
+operator_comp ::= operator_add "<" operator_comp
+		| operator_add "<=" operator_comp
+		| operator_add ">" operator_comp
+		| operator_add ">=" operator_comp
+		| operator_add
+operator_add ::= operator_times "+" operator_add
+		| operator_times "-" operator_add
+		| operator_times
+operator_times ::= rval "*" operator_times
+		| rval "/" operator_times
+		| rval "%" operator_times
+		| rval
 rval ::= "-" rval | "!" rval
         | "(" expr ")"
         | IDENT | IDENT "(" args ")"
