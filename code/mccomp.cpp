@@ -1634,14 +1634,14 @@ std::unique_ptr<BlockASTNode> ParseBlock();
 
 // else_stmt ::= "else" block
 //             | ε
-// TODO: why is this like this
 std::unique_ptr<ElseStmtASTNode> ParseElseStmt() {
+  // Check there is an else. If not then check the follow set to ensure no errors
+  // If there is not an else then the else pointer in an if statement will be null
   if(CurTok.type!=ELSE) {
     std::vector<TOKEN_TYPE> followSet =	{NOT, LPAR, MINUS, SC, IF, RETURN, WHILE, LBRA, RBRA, BOOL_LIT, FLOAT_LIT, IDENT, INT_LIT};
     auto search = std::find(followSet.begin(), followSet.end(), CurTok.type);
     if(search==followSet.end()) {
       HandleError("Expected either: '!', '(', '-', ';', 'if', 'return', 'while', '{', '}', BOOL_LIT, INT_LIT, FLOAT_LIT, IDENT in else production");
-      return nullptr;
     }
     return nullptr;
   }
@@ -2071,99 +2071,126 @@ Value *ParamsASTNode::codegen() {
 }
 
 Value *ExternASTNode::codegen() {
+  // Check if the function is declared already
   if(Functions[FuncName]) {
-    return HandleErrorValue("Function declared multiple times.");
-  }
-  std::vector<Type*> argTypes;
-  if(Params->IsVoid) {
-    argTypes.push_back(Type::getVoidTy(TheContext));
-  }
-  for(auto&& param : Params->ParamList) {
-    argTypes.push_back(GetTypeOfToken(param->VarType));
-  }
-  Type *funcType = GetTypeOfToken(VarType);
-  FunctionType *FT = FunctionType::get(funcType, argTypes, false);
-  Function *F = Function::Create(FT, Function::ExternalLinkage, FuncName, TheModule.get());
-  unsigned idx = 0;
-  for(auto &arg : F->args()) {
-    arg.setName(Params->ParamList[idx++]->Ident);
-  }    
-  if(verifyFunction(*F)) {
-    return nullptr;
-  }
-  Functions[FuncName] = F;
-  return F;
-}
-
-Value *LocalDeclASTNode::codegen() {
-  BasicBlock *currBlock = Builder.GetInsertBlock();
-  Function *function = currBlock->getParent();
-  Type *type = GetTypeOfToken(VarType);
-  if(NamedValues[Ident]) {
-    // Variable has been previously defined in this block
-    if(std::find(localD.begin(), localD.end(), Ident)!=localD.end()) {
-      return HandleErrorValue("Local variable declared multiple times.");
-    }
-    localD.push_back(Ident);
-  }  
-  AllocaInst *alloca = CreateEntryBlockAlloca(function, Ident, type);
-  NamedValues[Ident] = alloca;
-  return alloca;
-}
-
-Value *BlockASTNode::codegen() {
-  std::map<std::string, AllocaInst*> OldNamedVals;
-  std::vector<std::string> OldLocalD;
-  OldNamedVals.insert(NamedValues.begin(), NamedValues.end());
-  OldLocalD = localD;
-  //Handle local decls vector
-  for(auto &&decl : LocalDecls){
-    decl->codegen();
-  }
-  //Handle Statements vector
-  for(auto &&stmt : Statements){
-    stmt->codegen();
-  }
-  //Now want to remove any new variables from NamedVals;
-  for(auto &&kvp : NamedValues) {
-    if(OldNamedVals.count(kvp.first)!=0 && std::find(localD.begin(), localD.end(), kvp.first)==localD.end()) {
-      OldNamedVals[kvp.first] = NamedValues[kvp.first];
-    }
-  }
-  localD.clear();
-  localD = OldLocalD;
-  NamedValues.clear();
-  NamedValues.insert(OldNamedVals.begin(), OldNamedVals.end());
-  return Constant::getNullValue(Builder.getInt1Ty());
-}
-
-Value *FunDeclASTNode::codegen() {
-  if(Functions.count(FuncName)!=0) {
     return HandleErrorValue("Function declared multiple times. ");
   } 
   std::vector<Type*> argTypes;
   bool isVoid=false;
+  // Check if the parameter is void
+  // Get the types of each parameter
   if(Params) {
     isVoid = Params->IsVoid;
     for(auto&& param : Params->ParamList) {
       argTypes.push_back(GetTypeOfToken(param->VarType));
     }
   }
+  // Get the type of the function
   Type *funcType = GetTypeOfToken(VarType);
+  // Create the function
   FunctionType *FT = FunctionType::get(funcType, argTypes, false);
   Function *F = Function::Create(FT, Function::ExternalLinkage, FuncName, TheModule.get());
-  if(!F) {
-    return HandleErrorValue("Unable to create function.");
-  }
   unsigned idx = 0;
+  // Set the names of the arguments
+  for(auto &arg : F->args()) {
+    if(!isVoid) {
+      arg.setName(Params->ParamList[idx++]->Ident);
+    }
+  }
+  // Verify function returns true if there is an error verifying
+  if(verifyFunction(*F)) {
+    return nullptr;
+  }
+  // Add the function to the function map
+  Functions[FuncName] = F;
+  return F;
+}
+
+Value *LocalDeclASTNode::codegen() {
+  // Get the current block being inserted into
+  BasicBlock *currBlock = Builder.GetInsertBlock();
+  // LocalDecl only happens in a function so get the function we are declaring in
+  Function *function = currBlock->getParent();
+  // Get the type of the variable
+  Type *type = GetTypeOfToken(VarType);
+  if(NamedValues[Ident]) {
+    // Variable has been previously defined in this block
+    if(std::find(localD.begin(), localD.end(), Ident)!=localD.end()) {
+      return HandleErrorValue("Local variable declared multiple times.");
+    }
+    // Add the variable name to the store to indicate this is a local variable
+    localD.push_back(Ident);
+  }  
+  // Create alloca and store in the local variables map
+  AllocaInst *alloca = CreateEntryBlockAlloca(function, Ident, type);
+  NamedValues[Ident] = alloca;
+  return alloca;
+}
+
+Value *BlockASTNode::codegen() {
+  // Blocks (aside from function decls) retain local variables from the outer block
+  // Variables declared in the block should not persist after the block
+  std::map<std::string, AllocaInst*> OldNamedVals;
+  std::vector<std::string> OldLocalD;
+  OldNamedVals.insert(NamedValues.begin(), NamedValues.end());
+  OldLocalD = localD;
+  // Handle local decls vector
+  for(auto &&decl : LocalDecls){
+    decl->codegen();
+  }
+  // Handle Statements vector
+  for(auto &&stmt : Statements){
+    stmt->codegen();
+  }
+  // Now remove any new variables from NamedVals;
+  // Loop updates the value of any variable in NamedValues that was declared before the block
+  // Second expression checks if a variable was redeclared in the block
+  for(auto &&kvp : NamedValues) {
+    if(OldNamedVals.count(kvp.first)!=0 && std::find(localD.begin(), localD.end(), kvp.first)==localD.end()) {
+      OldNamedVals[kvp.first] = NamedValues[kvp.first];
+    }
+  }
+  // Return stores back to how they were before the block (aside from updated variables)
+  localD.clear();
+  localD = OldLocalD;
+  NamedValues.clear();
+  NamedValues.insert(OldNamedVals.begin(), OldNamedVals.end());
+  return nullptr;
+}
+
+Value *FunDeclASTNode::codegen() {
+  // Check if the function is declared already
+  if(Functions[FuncName]) {
+    return HandleErrorValue("Function declared multiple times. ");
+  } 
+  std::vector<Type*> argTypes;
+  bool isVoid=false;
+  // Check if the parameter is void
+  // Get the types of each parameter
+  if(Params) {
+    isVoid = Params->IsVoid;
+    for(auto&& param : Params->ParamList) {
+      argTypes.push_back(GetTypeOfToken(param->VarType));
+    }
+  }
+  // Get the type of the function
+  Type *funcType = GetTypeOfToken(VarType);
+  // Create the function
+  FunctionType *FT = FunctionType::get(funcType, argTypes, false);
+  Function *F = Function::Create(FT, Function::ExternalLinkage, FuncName, TheModule.get());
+  unsigned idx = 0;
+  // Set the names of the arguments
   for(auto &arg : F->args()) {
     if(!isVoid) {
       arg.setName(Params->ParamList[idx++]->Ident);
     }
   }
   BasicBlock *BB = BasicBlock::Create(TheContext, "func", F);
+  // Insert into the function
   Builder.SetInsertPoint(BB);
+  // Function definition will have new local variables
   NamedValues.clear();
+  // Allocate the arguments and store in NamedValues
   if(!isVoid){
     for(auto &arg : F->args()){
       AllocaInst *alloca = CreateEntryBlockAlloca(F, arg.getName().data(), arg.getType());
@@ -2171,49 +2198,56 @@ Value *FunDeclASTNode::codegen() {
       NamedValues[arg.getName().data()] = alloca;
     }
   }  
+  // Generate IR for the function body
   Block->codegen();
+  // Check all code paths return something
   if(!CheckAllPathsReturn(Block.get())) {
     return HandleErrorValue("Not all function code paths return a value.");
+  }  
+  // Verify function returns true if there is an error verifying
+  if(verifyFunction(*F)) {
+    return nullptr;
   }
-  
-  verifyFunction(*F);
   Functions[FuncName] = F;
   return F;
 }
 
 Value *VarDeclASTNode::codegen() {
-  //Only happen outside functions because of local_decl
+  // Only happen outside functions because of local_decl
+  // Get the llvm type of the stored type
   Type *type = GetTypeOfToken(VarType);
-  if (Globals.count(Ident)==1) {
+  if (Globals[Ident]) {
     return HandleErrorValue("Global value declared multiple times.");
   }
+  // Create and store a global variable
   GlobalVariable *g = new GlobalVariable(*TheModule, type, false, GlobalValue::CommonLinkage, Constant::getNullValue(type), Ident);
-  if(!g) {
-    return HandleErrorValue("Unable to create global variable declaration.");
-  }
   Globals[Ident] = g;
   return g;
 }
 
 Value *ElseStmtASTNode::codegen() {
+  // Generate the else body's IR
   return Block->codegen();
 }
 
 Value *IdentRvalASTNode::codegen() {
-  //Prioritises named values over globals first
+  // Prioritises named values over globals
   Value *temp = nullptr;
+  // Load the correct alloca
   if(Globals[Ident]) {
     temp = Builder.CreateLoad(Globals[Ident]->getValueType(), Globals[Ident], Ident);
   }
   if(NamedValues[Ident]) {
     temp = Builder.CreateLoad(NamedValues[Ident]->getAllocatedType(), NamedValues[Ident], Ident);
   }
-  if (!temp)
+  if (!temp) {
     return HandleErrorValue("Reference to undefined variable name.");
+  }
   return temp;
 }
 
 Value *ExprStmtASTNode::codegen() {
+  // ExprStmt can have null expr so need to check
   if(Expr) {
     return Expr->codegen();
   } else {
@@ -2222,55 +2256,68 @@ Value *ExprStmtASTNode::codegen() {
 }
 
 Value *IfStmtASTNode::codegen() {
+  // Generate the conditional's IR
   Value *CondV = Expr->codegen();
+  // Convert the conditional expression into a bool if it isn't already
   CondV = AttemptCast(Type::getInt1Ty(TheContext), CondV);
   if (!CondV)
     return HandleErrorValue("If conditional not a conditional.");
+  // Define the code blocks
   Function *function = Builder.GetInsertBlock()->getParent();
   BasicBlock *true_ = BasicBlock::Create(TheContext, "iftrue", function);
   BasicBlock *else_ = BasicBlock::Create(TheContext, "else");
   BasicBlock *end_ = BasicBlock::Create(TheContext, "end");
+  // Create a conditional branch based on whether CondV is true or false
   Builder.CreateCondBr(CondV, true_, else_);
   Builder.SetInsertPoint(true_);
-  Value *TrueV = Block->codegen();
-  if (!TrueV)
-    return HandleErrorValue("Error generating if body.");
+  // Generate the IR for the if body in the true block
+  Block->codegen();
+  // Create unconditional branch to the end block
   Builder.CreateBr(end_);
   function->insert(function->end(), else_);
   Builder.SetInsertPoint(else_);
+  // Generate the IR for the else body in the else block, if the else body exists
   if(ElseStmt) {
     Value *ElseV = ElseStmt->codegen();
-    if (!ElseV)
-      return HandleErrorValue("Error generating else body code.");;
   }
+  // Create unconditional branch to the end block
   Builder.CreateBr(end_);
   function->insert(function->end(), end_);
+  // Now following code is written to end block
   Builder.SetInsertPoint(end_);
   return nullptr;
 }
 
 Value *WhileStmtASTNode::codegen() {
+  // Define the code blocks
   Function *function = Builder.GetInsertBlock()->getParent();
   BasicBlock *condition = BasicBlock::Create(TheContext, "cond", function);
   BasicBlock *true_ = BasicBlock::Create(TheContext, "iftrue", function);
   BasicBlock *end_ = BasicBlock::Create(TheContext, "end");
+  // Create unconditional branch to the condition statement
   Builder.CreateBr(condition);
   Builder.SetInsertPoint(condition);
+  // Generate the conditional's IR within the condition block
   Value *CondV = Expr->codegen();
+  // Convert to bool if it isn't already
   CondV = AttemptCast(Type::getInt1Ty(TheContext), CondV);
-  if (!CondV)
+  if (!CondV) {
     return HandleErrorValue("While conditional not a conditional.");
+  }
+  // Create a conditional branch based on whether CondV is true or false
   Builder.CreateCondBr(CondV, true_, end_);
   Builder.SetInsertPoint(true_);
-  Value *TrueV = Statement->codegen();
-  if (!TrueV)
-    return HandleErrorValue("Error generating while body code.");
+  // Generate the IR for the while body in the true block
+  Statement->codegen();
+  // Create unconditional branch back to the condition block
   Builder.CreateBr(condition);
   function->insert(function->end(), end_);
+  // Now following code is written to end block
   Builder.SetInsertPoint(end_);
   return nullptr;
 }
 
+//TODO:
 Value *ReturnStmtASTNode::codegen() {
   Function *function = Builder.GetInsertBlock()->getParent();
   Type *returnType = function->getReturnType();
@@ -2642,7 +2689,7 @@ int main(int argc, char **argv) {
 
   // Run the parser now.
   std::unique_ptr<ProgramASTNode> prog = parser();
-  // llvm::outs() << prog->to_string(1) << "\n";
+  llvm::outs() << prog->to_string(1) << "\n";
   fprintf(stderr, "Parsing Finished\n");
   prog->codegen();
 
