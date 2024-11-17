@@ -37,10 +37,8 @@ using namespace llvm;
 using namespace llvm::sys;
 
 //TODO: 
-// - Test Parsing and Codegen
 // - Comment codegen
 // - Report
-// - remove unnecessary nodes from printing
 
 FILE *pFile;
 
@@ -493,7 +491,7 @@ public:
       str += "  ";
     }
     str += VarType.lexeme;
-    str += "\n  ";
+    str += "\n";
     for(int i = 0; i<indent; i++) {
       str += "  ";
     }
@@ -702,11 +700,7 @@ public:
   IdentRvalASTNode(std::string ident) : Ident(ident) {}
   Value *codegen() override;
   std::string to_string(int indent) const override {
-    std::string str = "Rval\n";
-    for(int i = 0; i<indent; i++) {
-      str += "  ";
-    }
-    int newIndent = indent + 1;
+    std::string str;
     str += Ident;
     return str;
   }
@@ -934,14 +928,15 @@ public:
   IntASTNode(int val) : Val(val) {}
   Value *codegen() override;
   std::string to_string(int indent) const override {
-    std::string str = "Rval\n";
-    for(int i = 0; i<indent; i++) {
-      str += "  ";
-    }
-    str += "Int\n";
-    for(int i = 0; i<indent+1; i++) {
-      str += "  ";
-    }
+    std::string str;
+    // std::string str = "Rval\n";
+    // for(int i = 0; i<indent; i++) {
+    //   str += "  ";
+    // }
+    // str += "Int\n";
+    // for(int i = 0; i<indent+1; i++) {
+    //   str += "  ";
+    // }
     str += std::to_string(Val);
     return str;
   }
@@ -955,14 +950,15 @@ public:
   BoolASTNode(bool val) : Val(val) {}
   Value *codegen() override;
   std::string to_string(int indent) const override {
-    std::string str = "Rval\n";
-    for(int i = 0; i<indent; i++) {
-      str += "  ";
-    }
-    str += "Int\n";
-    for(int i = 0; i<indent+1; i++) {
-      str += "  ";
-    }
+    std::string str;
+    // std::string str = "Rval\n";
+    // for(int i = 0; i<indent; i++) {
+    //   str += "  ";
+    // }
+    // str += "Bool\n";
+    // for(int i = 0; i<indent+1; i++) {
+    //   str += "  ";
+    // }
     str += std::to_string(Val);
     return str;
   }
@@ -976,14 +972,15 @@ public:
   FloatASTNode(float val) : Val(val) {}
   Value *codegen() override;
   std::string to_string(int indent) const override {
-    std::string str = "Rval\n";
-    for(int i = 0; i<indent; i++) {
-      str += "  ";
-    }
-    str += "Int\n";
-    for(int i = 0; i<indent+1; i++) {
-      str += "  ";
-    }
+    std::string str;
+    // std::string str = "Rval\n";
+    // for(int i = 0; i<indent; i++) {
+    //   str += "  ";
+    // }
+    // str += "Bool\n";
+    // for(int i = 0; i<indent+1; i++) {
+    //   str += "  ";
+    // }
     str += std::to_string(Val);
     return str;
   }
@@ -1001,16 +998,10 @@ public:
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
-    int newIndent = indent;
     if(Right!=nullptr) {
-      str += "Operator_Times\n";
       hasRight = true;
-      newIndent++;
-      for(int i = 0; i<indent; i++) {
-        str += "  ";
-      }
     }    
-    str += Left->to_string(newIndent);
+    str += Left->to_string(indent);
     if(hasRight) {
       str += "\n";
       for(int i = 0; i<indent; i++) {
@@ -1021,7 +1012,7 @@ public:
       for(int i = 0; i<indent; i++) {
         str += "  ";
       }
-      str += Right->to_string(newIndent);
+      str += Right->to_string(indent);
     }
     return str;
   }
@@ -1039,16 +1030,10 @@ public:
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
-    int newIndent = indent;
     if(Right!=nullptr) {
-      str += "Operator_Add\n";
       hasRight = true;
-      newIndent++;
-      for(int i = 0; i<indent; i++) {
-        str += "  ";
-      }
     }
-    str += Left->to_string(newIndent);
+    str += Left->to_string(indent);
     if(hasRight) {
       str += "\n";
       for(int i = 0; i<indent; i++) {
@@ -1059,7 +1044,7 @@ public:
       for(int i = 0; i<indent; i++) {
         str += "  ";
       }
-      str += Right->to_string(newIndent);
+      str += Right->to_string(indent);
     }
     return str;
   }
@@ -1077,16 +1062,10 @@ public:
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
-    int newIndent = indent;
     if(Right!=nullptr) {
-      str += "Operator_Comp\n";
       hasRight = true;
-      newIndent++;
-      for(int i = 0; i<indent; i++) {
-        str += "  ";
-      }
     }
-    str += Left->to_string(newIndent);
+    str += Left->to_string(indent);
     if(hasRight) {
       str += "\n";
       for(int i = 0; i<indent; i++) {
@@ -1097,7 +1076,7 @@ public:
       for(int i = 0; i<indent; i++) {
         str += "  ";
       }
-      str += Right->to_string(newIndent);
+      str += Right->to_string(indent);
     }
     return str;
   }
@@ -1116,16 +1095,10 @@ public:
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
-    int newIndent = indent;
     if(Right!=nullptr) {
-      str += "Operator_Equiv\n";
       hasRight = true;
-      newIndent++;
-      for(int i = 0; i<indent; i++) {
-        str += "  ";
-      }
     }
-    str += Left->to_string(newIndent);
+    str += Left->to_string(indent);
     if(hasRight) {
       str += "\n";
       for(int i = 0; i<indent; i++) {
@@ -1136,7 +1109,7 @@ public:
       for(int i = 0; i<indent; i++) {
         str += "  ";
       }
-      str += Right->to_string(newIndent);
+      str += Right->to_string(indent);
     }
     return str;
   }
@@ -1154,16 +1127,10 @@ public:
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
-    int newIndent = indent;
     if(Right!=nullptr) {
-      str += "Operator_And\n";
       hasRight = true;
-      newIndent++;
-      for(int i = 0; i<indent; i++) {
-        str += "  ";
-      }
     }
-    str += Left->to_string(newIndent);
+    str += Left->to_string(indent);
     if(hasRight) {
       str += "\n";
       for(int i = 0; i<indent; i++) {
@@ -1174,7 +1141,7 @@ public:
       for(int i = 0; i<indent; i++) {
         str += "  ";
       }
-      str += Right->to_string(newIndent);
+      str += Right->to_string(indent);
     }
     return str;
   }
@@ -1192,16 +1159,10 @@ public:
   std::string to_string(int indent) const override {
     std::string str;
     bool hasRight = false;
-    int newIndent = indent;
     if(Right!=nullptr) {
-      str += "Operator_Or\n";
       hasRight = true;
-      newIndent++;
-      for(int i = 0; i<indent; i++) {
-        str += "  ";
-      }
     }
-    str += Left->to_string(newIndent);
+    str += Left->to_string(indent);
     if(hasRight) {
       str += "\n";
       for(int i = 0; i<indent; i++) {
@@ -1212,7 +1173,7 @@ public:
       for(int i = 0; i<indent; i++) {
         str += "  ";
       }
-      str += Right->to_string(newIndent);
+      str += Right->to_string(indent);
     }
     return str;
   }
@@ -1230,8 +1191,7 @@ public:
     for(int i = 0; i<indent; i++) {
       str += "  ";
     }
-    int newIndent = indent + 1;
-    str += OrExpression->to_string(newIndent);
+    str += OrExpression->to_string(indent);
     return str;
   }
 };
@@ -2570,63 +2530,61 @@ Value *EquivASTNode::codegen() {
 }
 
 Value *AndASTNode::codegen() {
-  // Value *LHS = Left->codegen();
-  // if(!Right) {
-  //   return LHS;
-  // }
-  // Function* function = Builder.GetInsertBlock()->getParent();
-  // // Create blocks for evaluating RHS, true block, and result
-  // BasicBlock *rhs_ = BasicBlock::Create(Builder.getContext(), "rhs_", function);
-  // BasicBlock *end_ = BasicBlock::Create(Builder.getContext(), "end_", function);
-  // Builder.CreateCondBr(LHS, rhs_, end_);
-  // Builder.SetInsertPoint(rhs_);
-  // Value *RHS = Right->codegen();
-  // Builder.CreateBr(end_);
-  // Builder.SetInsertPoint(end_);
-  // PHINode *Result = Builder.CreatePHI(Builder.getInt1Ty(), 2, "ortmp");
-  // Result->addIncoming(ConstantInt::get(Type::getInt1Ty(TheContext), APInt(1, 0, true)), end_);
-  // Result->addIncoming(RHS, rhs_);
-  // return Result;
   Value *LHS = Left->codegen();
   if(!Right) {
     return LHS;
   }
-  Value *RHS = Right->codegen();
-  //Ors should only be done on booleans. 
-  //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
-  LHS = AttemptCast(Builder.getInt1Ty(), LHS);
-  RHS = AttemptCast(Builder.getInt1Ty(), RHS);
-  return Builder.CreateBinOp(Instruction::And, LHS, RHS, "and");
+  std::unique_ptr<AndASTNode> rightTmp = std::move(Right);
+  Function* function = Builder.GetInsertBlock()->getParent();
+  BasicBlock *end_ = BasicBlock::Create(Builder.getContext(), "end_", function);
+  std::vector<Value*> valueVec = {LHS};
+  std::vector<BasicBlock*> bbVec = {Builder.GetInsertBlock()};
+  while (rightTmp.get()) {
+    // Create blocks for evaluating RHS
+    BasicBlock *rhs_ = BasicBlock::Create(Builder.getContext(), "rhs_", function);
+    Builder.CreateCondBr(LHS, rhs_, end_);
+    Builder.SetInsertPoint(rhs_);
+    LHS = rightTmp->Left->codegen();
+    valueVec.push_back(LHS);
+    bbVec.push_back(rhs_);
+    rightTmp = std::move(rightTmp->Right);
+  }
+  Builder.CreateBr(end_);
+  Builder.SetInsertPoint(end_);
+  PHINode *Result = Builder.CreatePHI(Builder.getInt1Ty(), valueVec.size(), "andtmp");
+  for(int i = 0; i < valueVec.size(); i++) {
+    Result->addIncoming(valueVec[i], bbVec[i]);
+  }  
+  return Result;
 }
 
 Value *OrASTNode::codegen() {  
-  // Value *LHS = Left->codegen();
-  // if(!Right) {
-  //   return LHS;
-  // }
-  // Function* function = Builder.GetInsertBlock()->getParent();
-  // // Create blocks for evaluating RHS, true block, and result
-  // BasicBlock *rhs_ = BasicBlock::Create(Builder.getContext(), "rhs_", function);
-  // BasicBlock *end_ = BasicBlock::Create(Builder.getContext(), "end_", function);
-  // Builder.CreateCondBr(LHS, end_, rhs_);
-  // Builder.SetInsertPoint(rhs_);
-  // Value *RHS = Right->codegen();
-  // Builder.CreateBr(end_);
-  // Builder.SetInsertPoint(end_);
-  // PHINode *Result = Builder.CreatePHI(Builder.getInt1Ty(), 2, "ortmp");
-  // Result->addIncoming(ConstantInt::get(Type::getInt1Ty(TheContext), APInt(1, 1, true)), end_);
-  // Result->addIncoming(RHS, rhs_);
-  // return Result;
   Value *LHS = Left->codegen();
   if(!Right) {
     return LHS;
   }
-  Value *RHS = Right->codegen();
-  //Ors should only be done on booleans. 
-  //Program converts non bools to bools by checking if the value = 0. If not then the bool = 1
-  LHS = AttemptCast(Builder.getInt1Ty(), LHS);
-  RHS = AttemptCast(Builder.getInt1Ty(), RHS);
-  return Builder.CreateBinOp(Instruction::Or, LHS, RHS, "or");
+  std::unique_ptr<OrASTNode> rightTmp = std::move(Right);
+  Function* function = Builder.GetInsertBlock()->getParent();
+  BasicBlock *end_ = BasicBlock::Create(Builder.getContext(), "end_", function);
+  std::vector<Value*> valueVec = {LHS};
+  std::vector<BasicBlock*> bbVec = {Builder.GetInsertBlock()};
+  while (rightTmp.get()) {
+    // Create blocks for evaluating RHS
+    BasicBlock *rhs_ = BasicBlock::Create(Builder.getContext(), "rhs_", function);
+    Builder.CreateCondBr(LHS, end_, rhs_);
+    Builder.SetInsertPoint(rhs_);
+    LHS = rightTmp->Left->codegen();
+    valueVec.push_back(LHS);
+    bbVec.push_back(rhs_);
+    rightTmp = std::move(rightTmp->Right);
+  }
+  Builder.CreateBr(end_);
+  Builder.SetInsertPoint(end_);
+  PHINode *Result = Builder.CreatePHI(Builder.getInt1Ty(), valueVec.size(), "ortmp");
+  for(int i = 0; i < valueVec.size(); i++) {
+    Result->addIncoming(valueVec[i], bbVec[i]);
+  }  
+  return Result;
 }
 
 Value *OrExprASTNode::codegen() {
