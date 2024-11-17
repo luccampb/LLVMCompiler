@@ -3,6 +3,8 @@ source_filename = "mini-c"
 
 declare i32 @print_int(i32)
 
+declare i32 @goob()
+
 define i32 @addition(i32 %n, i32 %m) {
 func:
   %result = alloca i32, align 4
@@ -22,14 +24,14 @@ iftrue:                                           ; preds = %func
   %n6 = load i32, ptr %n1, align 4
   %m7 = load i32, ptr %m2, align 4
   %addtmp8 = add i32 %n6, %m7
-  %calltmp = call i32 @print_int(i32 %addtmp8)
+  %call = call i32 @print_int(i32 %addtmp8)
   br label %end
 
 else:                                             ; preds = %func
   %n9 = load i32, ptr %n1, align 4
   %m10 = load i32, ptr %m2, align 4
   %multmp = mul i32 %n9, %m10
-  %calltmp11 = call i32 @print_int(i32 %multmp)
+  %call11 = call i32 @print_int(i32 %multmp)
   br label %end
 
 end:                                              ; preds = %else, %iftrue

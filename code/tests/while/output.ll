@@ -15,7 +15,7 @@ func:
   store i32 12, ptr @test, align 4
   store i32 0, ptr %result, align 4
   %test = load i32, ptr @test, align 4
-  %calltmp = call i32 @print_int(i32 %test)
+  %call = call i32 @print_int(i32 %test)
   br label %cond
 
 cond:                                             ; preds = %iftrue, %func

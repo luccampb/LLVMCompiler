@@ -15,8 +15,8 @@ iftrue:                                           ; preds = %func
   %n3 = load i32, ptr %n1, align 4
   %n4 = load i32, ptr %n1, align 4
   %subtmp = sub i32 %n4, 1
-  %calltmp = call i32 @multiplyNumbers(i32 %subtmp)
-  %multmp = mul i32 %n3, %calltmp
+  %call = call i32 @multiplyNumbers(i32 %subtmp)
+  %multmp = mul i32 %n3, %call
   store i32 %multmp, ptr %result, align 4
   br label %end
 
@@ -34,6 +34,6 @@ func:
   %n1 = alloca i32, align 4
   store i32 %n, ptr %n1, align 4
   %n2 = load i32, ptr %n1, align 4
-  %calltmp = call i32 @multiplyNumbers(i32 %n2)
-  ret i32 %calltmp
+  %call = call i32 @multiplyNumbers(i32 %n2)
+  ret i32 %call
 }

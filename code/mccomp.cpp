@@ -36,10 +36,6 @@
 using namespace llvm;
 using namespace llvm::sys;
 
-//TODO: 
-// - Comment codegen
-// - Report
-
 FILE *pFile;
 
 //===----------------------------------------------------------------------===//
@@ -407,7 +403,7 @@ static std::map<std::string, GlobalVariable *> Globals;
 //===----------------------------------------------------------------------===//
 
 // StmtType - Enum representing statement types, used in each StmtASTNode
-// Used to easily distinguish different statements, especially return statements within codegen
+// Used to distinguish different statements within the CheckAllPathsReturn() function
 enum StmtType {
   EXPR = 1,
   BLOCK = 2,
@@ -754,7 +750,7 @@ public:
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "If Statement\n";
-    for(int i = 0; i<indent; i++) {
+    for(int i = 0; i<indent+1; i++) {
       str += "  ";
     }
     int newIndent = indent + 1;
@@ -790,7 +786,7 @@ public:
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str = "While Statement\n";
-    for(int i = 0; i<indent; i++) {
+    for(int i = 0; i<indent+1; i++) {
       str += "  ";
     }
     int newIndent = indent + 1;
@@ -859,17 +855,16 @@ public:
   AssignmentExprASTNode(std::string ident, std::unique_ptr<ExprASTNode> subexpr) : Ident(ident), SubExpr(std::move(subexpr)) {}
   Value *codegen() override;
   std::string to_string(int indent) const override {
-    std::string str = "Expr\n";
+    std::string str = "Assignment Expr\n";
     for(int i = 0; i<indent; i++) {
       str += "  ";
     }
-    int newIndent = indent + 1;
     str += Ident;
     str += "\n";
     for(int i = 0; i<indent; i++) {
       str += "  ";
     }
-    str += SubExpr->to_string(newIndent);
+    str += SubExpr->to_string(indent);
     return str;
   }
 };
@@ -891,8 +886,7 @@ public:
       for(int i = 0; i<indent; i++) {
         str += "  ";
       }
-      int newIndent = indent + 1;
-      str += expr->to_string(newIndent);
+      str += expr->to_string(indent);
     }
     return str;
   }
@@ -929,14 +923,6 @@ public:
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str;
-    // std::string str = "Rval\n";
-    // for(int i = 0; i<indent; i++) {
-    //   str += "  ";
-    // }
-    // str += "Int\n";
-    // for(int i = 0; i<indent+1; i++) {
-    //   str += "  ";
-    // }
     str += std::to_string(Val);
     return str;
   }
@@ -951,14 +937,6 @@ public:
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str;
-    // std::string str = "Rval\n";
-    // for(int i = 0; i<indent; i++) {
-    //   str += "  ";
-    // }
-    // str += "Bool\n";
-    // for(int i = 0; i<indent+1; i++) {
-    //   str += "  ";
-    // }
     str += std::to_string(Val);
     return str;
   }
@@ -973,14 +951,6 @@ public:
   Value *codegen() override;
   std::string to_string(int indent) const override {
     std::string str;
-    // std::string str = "Rval\n";
-    // for(int i = 0; i<indent; i++) {
-    //   str += "  ";
-    // }
-    // str += "Bool\n";
-    // for(int i = 0; i<indent+1; i++) {
-    //   str += "  ";
-    // }
     str += std::to_string(Val);
     return str;
   }
@@ -1149,7 +1119,7 @@ public:
 
 // OrASTNode - Represents two expressions ||'ed together
 // Right and Op can be null according to spec
-class OrASTNode : public ASTnode {
+class OrASTNode : public ExprASTNode {
   std::unique_ptr<AndASTNode> Left;
   std::unique_ptr<OrASTNode> Right;
 
@@ -1175,23 +1145,6 @@ public:
       }
       str += Right->to_string(indent);
     }
-    return str;
-  }
-};
-
-// OrExprASTNode - Represents a non assignment expression
-class OrExprASTNode : public ExprASTNode {
-  std::unique_ptr<OrASTNode> OrExpression;
-
-public:
-  OrExprASTNode(std::unique_ptr<OrASTNode> orexpression) : OrExpression(std::move(orexpression)) {}
-  Value *codegen() override;
-  std::string to_string(int indent) const override {
-    std::string str = "Expr\n";
-    for(int i = 0; i<indent; i++) {
-      str += "  ";
-    }
-    str += OrExpression->to_string(indent);
     return str;
   }
 };
@@ -1242,7 +1195,7 @@ static void HandleError(const char *str) {
 // params ::= param_list  
 //          |  "void" | epsilon
 // param_list ::= param "," param_list
-// 	|   param
+// 	            |   param
 // param ::= var_type IDENT
 // Combines params, param_list and param into one production
 std::unique_ptr<ParamsASTNode> ParseParams() {
@@ -1257,7 +1210,7 @@ std::unique_ptr<ParamsASTNode> ParseParams() {
   }  
   // Tracks if param list has any params in it
   bool isEpsilon = true;
-  // Parse param_list. If the next token is one of the below then we know its a param
+  // Parse param_list. If the next token is one of the below then we know it's a param
   while (CurTok.type == INT_TOK || CurTok.type == FLOAT_TOK || CurTok.type == BOOL_TOK) {
     // Param list won't be empty so set epsilon tracker to false
     isEpsilon = false;
@@ -1606,7 +1559,7 @@ std::unique_ptr<ExprASTNode> ParseExpr() {
   }
   // If the token is not an ident the expr must be an operator_or
   if(CurTok.type!=IDENT) {
-    return std::make_unique<OrExprASTNode>(std::move(ParseOperatorOr()));
+    return std::move(ParseOperatorOr());
   // Otherwise we need to do more investigation to see if it is operator_or or not
   } else {    
     TOKEN ident = CurTok;
@@ -1623,7 +1576,7 @@ std::unique_ptr<ExprASTNode> ParseExpr() {
       return std::make_unique<AssignmentExprASTNode>(ident.lexeme, std::move(ParseExpr()));
     } else {
       // expr ::= operator_or
-      return std::make_unique<OrExprASTNode>(std::move(ParseOperatorOr()));
+      return std::move(ParseOperatorOr());
     }
   }
 }
@@ -1949,17 +1902,23 @@ static std::unique_ptr<ProgramASTNode> parser() {
 // Codegen Functions
 //===----------------------------------------------------------------------===//
 
+// Functions which assist in the codegen
+
+// Handles semantic errors
 Value *HandleErrorValue(std::string str) {
   std::string msg = "Semantic Error: " + str; 
   fprintf(stderr, "%s\n", msg.c_str());
   exit(0);
 }
 
+// Creates allocas
 static AllocaInst* CreateEntryBlockAlloca(Function *TheFunction, const std::string &VarName, Type *Type_) {
   IRBuilder<> tmpB(&TheFunction->getEntryBlock(), TheFunction->getEntryBlock().begin());
   return tmpB.CreateAlloca(Type_, 0, VarName.c_str());
 }
 
+// Gets the llvm type from a TOKEN
+// Returns a null pointer if the TOKEN is not a type
 static Type *GetTypeOfToken(TOKEN tok) {
   switch (tok.type) {
     case BOOL_TOK:
@@ -1974,39 +1933,46 @@ static Type *GetTypeOfToken(TOKEN tok) {
   return nullptr;
 }
 
-//A type can be widened regardless of associated value, but a narrowing conversion should only happen in certain boolean cases
+// Attempts to cast a value to a given goalType
+// A type can be widened regardless of associated value, but a narrowing conversion should only happen in certain boolean cases
 static Value* AttemptCast(Type *goalType, Value *v) {
-  //Goal is bool, we make a comparison between 0 and v:
+  // Narrowing conversion to boolean is allowed in some cases so we handle whether it's valid there
+  // Goal is bool so we make a comparison between the value and 0
   if (goalType->isIntegerTy(1)) {
     if (v->getType()->isIntegerTy(32)) {
       return Builder.CreateICmpNE(v, ConstantInt::get(TheContext, APInt(32, 0, true)), "tobool");
     } else if (v->getType()->isFloatTy()) {
       return Builder.CreateFCmpONE(v, ConstantFP::get(TheContext, APFloat(0.0f)), "tobool");
     } else if (v->getType()->isIntegerTy(1)) {
+      // No conversion needed
       return v;
     } else {
       return nullptr;
     }  
   }  
-  //Goal is int:
+  // Goal is an integer
   else if (goalType->isIntegerTy(32)) {
     if (v->getType()->isIntegerTy(1)) {
-      return Builder.CreateZExt(v, Builder.getInt32Ty());
+      return Builder.CreateZExt(v, Type::getInt32Ty(TheContext));
+    // Do not allow narrowing conversion from float to an integer
     } else if (v->getType()->isFloatTy()) {
       return HandleErrorValue("Narrowing conversion not allowed: converting float to int.");
     } else if (v->getType()->isIntegerTy(32)) {
+      // No conversion needed
       return v;
     } else {
       return nullptr;   
     }
   }  
-  //Goal is float:
+  // Goal is a float
+  // Floats are the highest type so any other type can be widened to a float
   else if (goalType->isFloatTy()) {
     if (v->getType()->isIntegerTy(32)) {
-      return Builder.CreateSIToFP(v, Builder.getFloatTy());
+      return Builder.CreateSIToFP(v, Type::getFloatTy(TheContext));
     } else if (v->getType()->isIntegerTy(1)) {
-      return Builder.CreateSIToFP(v, Builder.getFloatTy());
+      return Builder.CreateSIToFP(v, Type::getFloatTy(TheContext));
     } else if (v->getType()->isFloatTy()) {
+      // No conversion needed
       return v;
     } else {
       return nullptr;   
@@ -2018,41 +1984,52 @@ static Value* AttemptCast(Type *goalType, Value *v) {
   }  
 }
 
-//Returns the highest type of two types where hierarchy goes float -> int -> bool
+// Returns the "highest" of two types where hierarchy is defined as float -> int -> bool
 static Type* HighestType(Type *t1, Type *t2) {
   if(t1->isFloatTy() || t2->isFloatTy()) {
-    return Builder.getFloatTy();
+    return Type::getFloatTy(TheContext);
   }
   if(t1->isIntegerTy(32) || t2->isIntegerTy(32)) {
-    return Builder.getInt32Ty();
+    return Type::getInt32Ty(TheContext);
   }
-  return Builder.getInt1Ty();
+  return Type::getInt1Ty(TheContext);
 }
 
+// Checks if all code paths in a block return a value
 static bool CheckAllPathsReturn(BlockASTNode* block) {
   //Only care about the block's statements
   for(auto &&stmt : block->Statements) {
+    // If a return statement is defined first then we don't have to check any statements defined after it as they won't be executed
     if(stmt->stmtType()==RETSTMT) {
       return true;
     }
-    //Must be either if/while/block/expr
+    // Must be either if/while/block/expr
+    // Handle block case
     if(stmt->stmtType()==BLOCK) {
-      //Can static cast because we know it must be a BlockASTNode
+      // Can static cast because we know it must be a BlockASTNode
       BlockASTNode* subBlock = static_cast<BlockASTNode*>(stmt.get());
+      // Recursively check if all paths in the subBlock have a return statement;
       return CheckAllPathsReturn(subBlock);
     }
+    // Handle if case
     if(stmt->stmtType()==IFSTMT) {
-      //Can static cast because we know it must be an IfStmtASTNode
+      // Can static cast because we know it must be an IfStmtASTNode
       IfStmtASTNode* ifBlock = static_cast<IfStmtASTNode*>(stmt.get());
+      // Check if the if statement has an else
       if(!ifBlock->ElseStmt) {
-        continue; //If it has no else stmt it doesnt matter whether the if has a return statement or not
+        //If the if statement has no else stmt it doesn't matter whether it has a return statement or not
+        continue; 
+      // If it has an else stmt then check that both the if body and else body return values
       } else {
         if(CheckAllPathsReturn(ifBlock->Block.get()) && CheckAllPathsReturn(ifBlock->ElseStmt->Block.get())){
           return true;
         }
       }
     }
+    // We don't need to handle exprs since they have no sub blocks
+    // We don't need to handle whiles since we cannot guarantee that a return defined within will be reached before runtime
   }
+  // Return false if no sub blocks return something
   return false;
 }
 
@@ -2061,12 +2038,12 @@ static bool CheckAllPathsReturn(BlockASTNode* block) {
 //===----------------------------------------------------------------------===//
 
 Value *ParamASTNode::codegen() {
-  //Handled in FunDeclASTNode and ExternASTNode instead of here due to how functions are created in llvm IR
+  // Handled in FunDeclASTNode and ExternASTNode due to how functions are created in llvm IR
   return nullptr;
 }
 
 Value *ParamsASTNode::codegen() {
-  //Handled in FunDeclASTNode and ExternASTNode instead of here due to how functions are created in llvm IR
+  // Handled in FunDeclASTNode and ExternASTNode due to how functions are created in llvm IR
   return nullptr;
 }
 
@@ -2317,23 +2294,30 @@ Value *WhileStmtASTNode::codegen() {
   return nullptr;
 }
 
-//TODO:
 Value *ReturnStmtASTNode::codegen() {
+  // Get the function the return statement is defined in
   Function *function = Builder.GetInsertBlock()->getParent();
-  Type *returnType = function->getReturnType();
+  Type *funcType = function->getReturnType();
+  // If Expr is not a nullptr then we have a return with an expression
   if(Expr) {
     Value *retVal = Expr->codegen();
-    Type *type = HighestType(retVal->getType(), returnType);
+    // Get the highest type between the type of the return value and the function type
+    Type *type = HighestType(retVal->getType(), funcType);
+    // Cast the return value to the highest type
     retVal = AttemptCast(type, retVal);
-    if(!retVal || type != returnType) {
-      if(returnType->isVoidTy()) {
+    // If the highest type is not the same as the function type, then we would be narrowing a value when returning so error
+    if(!retVal || type != funcType) {
+      // If !retVal then the return statement has an expression. This creates an error if the function is defined as void.
+      if(funcType->isVoidTy()) {
         return HandleErrorValue("Void function returns value.");
       }
       return HandleErrorValue("Function return value has higher type than defined return type.");
     }
     return Builder.CreateRet(retVal);
+  // If Expr is a nullptr then we have a void return
   } else {
-    if(!returnType->isVoidTy()) {
+    // Make sure the function is defined as void if there is a void return
+    if(!funcType->isVoidTy()) {
       return HandleErrorValue("Non-void function is returning void.");
     }
     return Builder.CreateRetVoid();
@@ -2341,18 +2325,17 @@ Value *ReturnStmtASTNode::codegen() {
 }
 
 Value *UnaryOpRValASTNode::codegen() {
+  // Generate the rval's IR
   Value *RvalValue = RVal->codegen();
-  if(!RvalValue) {
-    return HandleErrorValue("Declared '!' or '-' with no associated value.");
-  }
   if(Op.lexeme=="!") {
-    //Must be a boolean
-    RvalValue = AttemptCast(Builder.getInt1Ty(), RvalValue);
+    // "!" can only be used with booleans
+    RvalValue = AttemptCast(Type::getInt1Ty(TheContext), RvalValue);
     if(!RvalValue) {
       return HandleErrorValue("Unable to cast negated value to boolean.");
     }
     return Builder.CreateNot(RvalValue, "not");
   } else {
+    // Must be a negated value
     if(RvalValue->getType()->isFloatTy()) {
       return Builder.CreateFNeg(RvalValue, "neg");
     }
@@ -2361,20 +2344,26 @@ Value *UnaryOpRValASTNode::codegen() {
 }
 
 Value *AssignmentExprASTNode::codegen() {
+  // Generate the expression to the right of the "="'s IR
   Value *subExpr = SubExpr->codegen();
+  // Check NamedValues first as we prioritise local variables over globals with the same name
   if(NamedValues[Ident]) {
     Type *storedType = NamedValues[Ident]->getAllocatedType();
+    // Cast the subexpression to the type of the variable
     subExpr = AttemptCast(NamedValues[Ident]->getAllocatedType(), subExpr);
     if(!subExpr || storedType != HighestType(storedType, subExpr->getType())) {
       return HandleErrorValue("Attempt to assign local variable with expression of unmatching type.");
     }
+    // Store the value of the subexpression in the variable
     return Builder.CreateStore(subExpr, NamedValues[Ident]);
   } else if(Globals[Ident]) {
     Type *storedType = Globals[Ident]->getValueType();
+    // Cast the subexpression to the type of the global variable
     subExpr = AttemptCast(Globals[Ident]->getValueType(), subExpr);
     if(!subExpr || storedType != HighestType(storedType, subExpr->getType())) {
       return HandleErrorValue("Attempt to assign global variable with expression of unmatching type.");
     }
+    // Store the value of the subexpression in the global variable
     return Builder.CreateStore(subExpr, Globals[Ident]);
   } else {
     return HandleErrorValue("Reference to undeclared variable.");
@@ -2382,12 +2371,14 @@ Value *AssignmentExprASTNode::codegen() {
 }
 
 Value *ArgListASTNode::codegen() {
-  //Handled in FunctionCallASTNode
+  // Handled in FunctionCallASTNode
   return nullptr;
 }
 
 Value *FunctionCallASTNode::codegen() {
+  // Get the function being called
   Function* calleeFunc = TheModule->getFunction(FuncName);
+  // Get the arguments of the function call
   std::vector<std::unique_ptr<ExprASTNode>> args;
   if(Args) {
     args = std::move(Args->Exprs);
@@ -2398,29 +2389,34 @@ Value *FunctionCallASTNode::codegen() {
   if (calleeFunc->arg_size() != args.size()) {
     return HandleErrorValue("Incorrect number of arguments passed to function.");
   }  
+  // Store the generated values of the arguments passed
   std::vector<Value*> codegenArgsV;
   Value *argV;
   Type *highest;
   unsigned int idx = 0;
+  // Loop through the arguments of the called function
   for (auto &arg : calleeFunc->args()) {
     argV = args[idx++]->codegen();
     highest = HighestType(arg.getType(), argV->getType());
-    //Ensures the passed argument value is a lower or equal type to the intended argument type
+    // Ensures the passed argument value is a lower or equal type to the intended argument type
     argV = AttemptCast(arg.getType(), argV);
-    //Error if the casting happens to go wrong
+    // Error if it cannot cast or the passed value has a higher type than the function defined
     if (!argV || arg.getType()!=highest) {
       return HandleErrorValue("Incorrect value type for function argument.");
     }
+    // Add the argument value to the store
     codegenArgsV.push_back(argV);
   }
-  return Builder.CreateCall(calleeFunc, codegenArgsV, "calltmp");
+  return Builder.CreateCall(calleeFunc, codegenArgsV, "call");
 }
 
 Value *IntASTNode::codegen() {
+  // Return the value as a constant int32
   return ConstantInt::get(TheContext, APInt(32, Val, true));
 }
 
 Value *BoolASTNode::codegen() {
+  // Return the value as a constant int1
   if(Val) {
     return ConstantInt::get(TheContext, APInt(1, 1, true));
   }
@@ -2428,36 +2424,46 @@ Value *BoolASTNode::codegen() {
 }
 
 Value *FloatASTNode::codegen() {
+  // Return the value as a constant float
   return ConstantFP::get(TheContext, APFloat(Val));
 }
 
 Value *TimesASTNode::codegen() {
+  // Return the IR for the left side of the times if there is no right side
   Value *LHS = Left->codegen();
   if(!Right) {
     return LHS;
   }
+  // Stores to calculate the values of the TimesNode children
   std::vector<Value*> valueVec = {LHS};
   std::vector<TOKEN> operators = {Op};
   std::unique_ptr<TimesASTNode> rightTmp = std::move(Right);
   int count = 1;
+  // While the next right subchild has its own right subchild
   while (rightTmp.get()!=nullptr) {
+    // Generate IR for rightTmp's left subchild
     valueVec.push_back(rightTmp->Left->codegen());
+    // Store the of a rightTmp if it has a right subchild
     if(rightTmp->Right) {
       operators.push_back(rightTmp->Op); 
     }
+    // rightTmp now points to its right subchild
     rightTmp = std::move(rightTmp->Right);  
   }
-  //Loop through valuevec and operators and createbinops
+  // Loop through valuevec and operators to createbinops
   Value *currVal = valueVec[0];
   for(int i = 0; i < valueVec.size()-1; i++) {
     TOKEN currOp = operators[i];
     Value *nextVal = valueVec[i+1];
     Type *targetType = HighestType(currVal->getType(), nextVal->getType());
+    // Equalise the types of the two values about to be used
     currVal = AttemptCast(targetType, currVal);
     nextVal = AttemptCast(targetType, nextVal);
+    // Modulus operator only works with integers, not floats
     if(currOp.lexeme=="%" && targetType->isFloatTy()) {
       return HandleErrorValue("Modulus operator carried out with floating point numbers");
     }
+    // Integer binops
     if(targetType->isIntegerTy()) {
       if(currOp.lexeme=="*") {
         currVal = Builder.CreateBinOp(Instruction::Mul, currVal, nextVal, "multmp");
@@ -2466,6 +2472,7 @@ Value *TimesASTNode::codegen() {
       } else {
         currVal = Builder.CreateBinOp(Instruction::SRem, currVal, nextVal, "modtmp");
       } 
+    // Float binops
     } else {
       if(currOp.lexeme=="*") {
         currVal = Builder.CreateBinOp(Instruction::FMul, currVal, nextVal, "multmp");
@@ -2478,18 +2485,24 @@ Value *TimesASTNode::codegen() {
 }
 
 Value *AddASTNode::codegen() {
+  // Return the IR for the left side of the times if there is no right side
   Value *LHS = Left->codegen();
   if(!Right) {
     return LHS;
   }
+  // Stores to calculate the values of the AddNode children
   std::vector<Value*> valueVec = {LHS};
   std::vector<TOKEN> operators = {Op};
   std::unique_ptr<AddASTNode> rightTmp = std::move(Right);
+  // While the next right subchild has its own right subchild
   while (rightTmp.get()) {
+    // Generate IR for rightTmp's left subchild
     valueVec.push_back(rightTmp->Left->codegen());
+    // Store the of a rightTmp if it has a right subchild
     if(rightTmp->Right) {
       operators.push_back(rightTmp->Op); 
     }
+    // rightTmp now points to its right subchild
     rightTmp = std::move(rightTmp->Right);    
   }
   //Loop through valuevec and operators and createbinops
@@ -2498,14 +2511,17 @@ Value *AddASTNode::codegen() {
     TOKEN currOp = operators[i];
     Value *nextVal = valueVec[i+1];
     Type *targetType = HighestType(currVal->getType(), nextVal->getType());
+    // Equalise the types of the two values about to be used
     currVal = AttemptCast(targetType, currVal);
     nextVal = AttemptCast(targetType, nextVal);
+    // Integer binops
     if(targetType->isIntegerTy()) {
       if(currOp.lexeme=="+") {
         currVal = Builder.CreateBinOp(Instruction::Add, currVal, nextVal, "addtmp");
       } else {
         currVal = Builder.CreateBinOp(Instruction::Sub, currVal, nextVal, "subtmp");
       }
+    // Float binops
     } else {
       if(currOp.lexeme=="+") {
         currVal = Builder.CreateBinOp(Instruction::FAdd, currVal, nextVal, "addtmp");
@@ -2518,15 +2534,17 @@ Value *AddASTNode::codegen() {
 }
 
 Value *CompASTNode::codegen() {
+  // Return the IR for the left side of the times if there is no right side
   Value *LHS = Left->codegen();
   if(!Right) {
     return LHS;
   }
   Value *RHS = Right->codegen();
+  // Equalise the types of the two values to be compared
   Type *targetType = HighestType(LHS->getType(), RHS->getType());
   LHS = AttemptCast(targetType, LHS);
   RHS = AttemptCast(targetType, RHS);
-  // Value *temp;
+  // Integer binops
   if(targetType->isIntegerTy()) {
     if(Op.lexeme==">") {
       return Builder.CreateICmpSGT(LHS, RHS, "gt");
@@ -2537,6 +2555,7 @@ Value *CompASTNode::codegen() {
     } else {
       return Builder.CreateICmpSLE(LHS, RHS, "le");
     }
+  // Float binops
   } else {
     if(Op.lexeme==">") {
       return Builder.CreateFCmpUGT(LHS, RHS, "gt");
@@ -2548,25 +2567,27 @@ Value *CompASTNode::codegen() {
       return Builder.CreateFCmpULE(LHS, RHS, "le");
     }
   }
-  // return Builder.CreateUIToFP(temp, Type::getFloatTy(TheContext), "booltmp");
 }
 
 Value *EquivASTNode::codegen() {
+  // Return the IR for the left side of the times if there is no right side
   Value *LHS = Left->codegen();
   if(!Right) {
     return LHS;
   }
   Value *RHS = Right->codegen();
+  // Equalise the types of the two values to be compared
   Type *targetType = HighestType(LHS->getType(), RHS->getType());
   LHS = AttemptCast(targetType, LHS);
   RHS = AttemptCast(targetType, RHS);
-  // Value *temp;
+  // Integer binops
   if(targetType->isIntegerTy()) {
     if(Op.lexeme=="==") {
       return Builder.CreateICmpEQ(LHS, RHS, "eq");
     } else {
       return Builder.CreateICmpNE(LHS, RHS, "ne");
     }
+  // Float binops
   } else {
     if(Op.lexeme=="==") {
       return Builder.CreateFCmpUEQ(LHS, RHS, "eq");
@@ -2577,68 +2598,80 @@ Value *EquivASTNode::codegen() {
 }
 
 Value *AndASTNode::codegen() {
+  // Return the IR for the left side of the times if there is no right side
   Value *LHS = Left->codegen();
   if(!Right) {
     return LHS;
   }
   std::unique_ptr<AndASTNode> rightTmp = std::move(Right);
   Function* function = Builder.GetInsertBlock()->getParent();
+  // Block for after the and has been dealt with
   BasicBlock *end_ = BasicBlock::Create(Builder.getContext(), "end_", function);
+  // Create value and basic block stores for phi node
   std::vector<Value*> valueVec = {LHS};
   std::vector<BasicBlock*> bbVec = {Builder.GetInsertBlock()};
+  // Loop through the right subchildren of the AndNode
   while (rightTmp.get()) {
     // Create blocks for evaluating RHS
     BasicBlock *rhs_ = BasicBlock::Create(Builder.getContext(), "rhs_", function);
+    // If LHS is true it branches to the end block and doesn't execute the unnecessary conditional
     Builder.CreateCondBr(LHS, rhs_, end_);
     Builder.SetInsertPoint(rhs_);
+    // Generate IR for the next conditional
     LHS = rightTmp->Left->codegen();
+    // Add the value and basic block to the stores for the phi node
     valueVec.push_back(LHS);
     bbVec.push_back(rhs_);
     rightTmp = std::move(rightTmp->Right);
   }
   Builder.CreateBr(end_);
   Builder.SetInsertPoint(end_);
-  PHINode *Result = Builder.CreatePHI(Builder.getInt1Ty(), valueVec.size(), "andtmp");
+  // Add the values and blocks to a phi node
+  PHINode *Result = Builder.CreatePHI(Type::getInt1Ty(TheContext), valueVec.size(), "andtmp");
   for(int i = 0; i < valueVec.size(); i++) {
     Result->addIncoming(valueVec[i], bbVec[i]);
-  }  
+  }
   return Result;
 }
 
 Value *OrASTNode::codegen() {  
+  // Return the IR for the left side of the times if there is no right side
   Value *LHS = Left->codegen();
   if(!Right) {
     return LHS;
   }
   std::unique_ptr<OrASTNode> rightTmp = std::move(Right);
   Function* function = Builder.GetInsertBlock()->getParent();
+  // Block for after the and has been dealt with
   BasicBlock *end_ = BasicBlock::Create(Builder.getContext(), "end_", function);
+  // Create value and basic block stores for phi node
   std::vector<Value*> valueVec = {LHS};
   std::vector<BasicBlock*> bbVec = {Builder.GetInsertBlock()};
   while (rightTmp.get()) {
     // Create blocks for evaluating RHS
     BasicBlock *rhs_ = BasicBlock::Create(Builder.getContext(), "rhs_", function);
+    // If LHS is true it branches to the end block and doesn't execute the unnecessary conditional
     Builder.CreateCondBr(LHS, end_, rhs_);
     Builder.SetInsertPoint(rhs_);
+    // Generate IR for the next conditional
     LHS = rightTmp->Left->codegen();
+    // Add the value and basic block to the stores for the phi node
     valueVec.push_back(LHS);
     bbVec.push_back(rhs_);
     rightTmp = std::move(rightTmp->Right);
   }
   Builder.CreateBr(end_);
   Builder.SetInsertPoint(end_);
-  PHINode *Result = Builder.CreatePHI(Builder.getInt1Ty(), valueVec.size(), "ortmp");
+  // Add the values and blocks to a phi node
+  PHINode *Result = Builder.CreatePHI(Type::getInt1Ty(TheContext), valueVec.size(), "ortmp");
   for(int i = 0; i < valueVec.size(); i++) {
     Result->addIncoming(valueVec[i], bbVec[i]);
   }  
   return Result;
 }
 
-Value *OrExprASTNode::codegen() {
-  return OrExpression->codegen();
-}
-
 Value *ProgramASTNode::codegen() {
+  // Generate the IR for the externs and decls
   for(auto &&extern_ : ExternList) {
     extern_->codegen();
   }
@@ -2647,6 +2680,7 @@ Value *ProgramASTNode::codegen() {
   }
   return nullptr;
 }
+
 //===----------------------------------------------------------------------===//
 // AST Printer
 //===----------------------------------------------------------------------===//
@@ -2689,7 +2723,7 @@ int main(int argc, char **argv) {
 
   // Run the parser now.
   std::unique_ptr<ProgramASTNode> prog = parser();
-  llvm::outs() << prog->to_string(1) << "\n";
+  // llvm::outs() << prog->to_string(1) << "\n";
   fprintf(stderr, "Parsing Finished\n");
   prog->codegen();
 

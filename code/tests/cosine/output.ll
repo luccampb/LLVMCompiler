@@ -53,7 +53,7 @@ iftrue:                                           ; preds = %cond
 
 end:                                              ; preds = %cond
   %cos19 = load float, ptr %cos, align 4
-  %calltmp = call float @print_float(float %cos19)
+  %call = call float @print_float(float %cos19)
   %cos20 = load float, ptr %cos, align 4
   ret float %cos20
 }

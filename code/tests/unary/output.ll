@@ -20,7 +20,7 @@ func:
   %addtmp = fadd float %0, %m4
   store float %addtmp, ptr %result, align 4
   %result5 = load float, ptr %result, align 4
-  %calltmp = call float @print_float(float %result5)
+  %call = call float @print_float(float %result5)
   %sum6 = load float, ptr %sum, align 4
   %result7 = load float, ptr %result, align 4
   %addtmp8 = fadd float %sum6, %result7
@@ -32,7 +32,7 @@ func:
   %addtmp11 = fadd float %1, %neg
   store float %addtmp11, ptr %result, align 4
   %result12 = load float, ptr %result, align 4
-  %calltmp13 = call float @print_float(float %result12)
+  %call13 = call float @print_float(float %result12)
   %sum14 = load float, ptr %sum, align 4
   %result15 = load float, ptr %result, align 4
   %addtmp16 = fadd float %sum14, %result15
@@ -45,7 +45,7 @@ func:
   %addtmp21 = fadd float %2, %neg20
   store float %addtmp21, ptr %result, align 4
   %result22 = load float, ptr %result, align 4
-  %calltmp23 = call float @print_float(float %result22)
+  %call23 = call float @print_float(float %result22)
   %sum24 = load float, ptr %sum, align 4
   %result25 = load float, ptr %result, align 4
   %addtmp26 = fadd float %sum24, %result25
@@ -58,7 +58,7 @@ func:
   %addtmp31 = fadd float %3, %neg30
   store float %addtmp31, ptr %result, align 4
   %result32 = load float, ptr %result, align 4
-  %calltmp33 = call float @print_float(float %result32)
+  %call33 = call float @print_float(float %result32)
   %sum34 = load float, ptr %sum, align 4
   %result35 = load float, ptr %result, align 4
   %addtmp36 = fadd float %sum34, %result35

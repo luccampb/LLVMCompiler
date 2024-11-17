@@ -13,7 +13,7 @@ func:
   %n1 = alloca i32, align 4
   store i32 %n, ptr %n1, align 4
   %n2 = load i32, ptr %n1, align 4
-  %calltmp = call i32 @print_int(i32 %n2)
+  %call = call i32 @print_int(i32 %n2)
   store i32 0, ptr %first, align 4
   store i32 1, ptr %second, align 4
   store i32 1, ptr %c, align 4
@@ -49,7 +49,7 @@ else:                                             ; preds = %iftrue
 
 end:                                              ; preds = %else, %iftrue6
   %next12 = load i32, ptr %next, align 4
-  %calltmp13 = call i32 @print_int(i32 %next12)
+  %call13 = call i32 @print_int(i32 %next12)
   %c14 = load i32, ptr %c, align 4
   %addtmp15 = add i32 %c14, 1
   store i32 %addtmp15, ptr %c, align 4
@@ -61,7 +61,7 @@ end:                                              ; preds = %else, %iftrue6
 
 end19:                                            ; preds = %cond
   %total20 = load i32, ptr %total, align 4
-  %calltmp21 = call i32 @print_int(i32 %total20)
+  %call21 = call i32 @print_int(i32 %total20)
   %total22 = load i32, ptr %total, align 4
   ret i32 %total22
 }
