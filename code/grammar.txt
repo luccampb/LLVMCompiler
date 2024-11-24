@@ -36,7 +36,6 @@ else_stmt  ::= "else" block
               |  epsilon
 return_stmt ::= "return" ";" 
                |  "return" expr ";"       
-# operators in order of increasing precedence    
 expr ::= IDENT "=" expr
         | operator_or  
 operator_or ::= operator_and "||" operator_or
